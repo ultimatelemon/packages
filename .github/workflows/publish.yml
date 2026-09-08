@@ -1,0 +1,53 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/**']
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: publish what is not on npm yet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret NPM_TOKEN"
+            exit 1
+          fi
+          published=0
+          for dir in packages/*/; do
+            name=$(node -p "require('./${dir}package.json').name")
+            version=$(node -p "require('./${dir}package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm"
+            else
+              echo "publishing $name@$version"
+              npm publish --workspace "$name" --provenance --access public
+              published=$((published + 1))
+            fi
+          done
+          echo "published $published package(s)"

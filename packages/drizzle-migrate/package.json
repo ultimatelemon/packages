@@ -1,0 +1,40 @@
+{
+  "name": "@ultimatelemon/drizzle-migrate",
+  "version": "1.0.0",
+  "description": "Run Drizzle migrations at container start, behind a Postgres advisory lock.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ultimatelemon/packages.git",
+    "directory": "packages/drizzle-migrate"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.44",
+    "pg": ">=8"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.6",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.21.0",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

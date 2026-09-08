@@ -1,0 +1,32 @@
+{
+  "name": "@ultimatelemon/prettier-config",
+  "version": "1.0.0",
+  "description": "Shared Prettier configuration for UltimateLemon projects.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ultimatelemon/packages.git",
+    "directory": "packages/prettier-config"
+  },
+  "main": "index.json",
+  "exports": {
+    ".": "./index.json",
+    "./tailwind": "./tailwind.json"
+  },
+  "files": [
+    "index.json",
+    "tailwind.json"
+  ],
+  "peerDependencies": {
+    "prettier": ">=3",
+    "prettier-plugin-tailwindcss": ">=0.6"
+  },
+  "peerDependenciesMeta": {
+    "prettier-plugin-tailwindcss": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
