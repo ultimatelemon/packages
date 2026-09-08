@@ -33,5 +33,9 @@ silently, and `any` tends to appear exactly where types matter most.
 `explicit-module-boundary-types` is a warning on exports only, and
 `no-console` allows `warn`, `error` and `info`.
 
+`.tsx` files are exempt from the return-type rule: a component's return type is
+obvious from its body, and annotating it means importing `JSX` in every file
+for no signal. Plain `.ts` exports still get the nudge.
+
 Tests, seeds, migrators and scripts are exempt from the console and return-type
 rules.

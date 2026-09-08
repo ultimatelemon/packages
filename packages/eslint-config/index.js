@@ -69,6 +69,13 @@ export function config({
     },
 
     {
+      files: ['**/*.tsx'],
+      rules: {
+        '@typescript-eslint/explicit-module-boundary-types': 'off'
+      }
+    },
+
+    {
       files: RELAXED_FILES,
       rules: {
         'no-console': 'off',
