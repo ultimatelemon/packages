@@ -29,7 +29,7 @@ export function config({
 } = {}) {
   if (typeChecked && !rootDir) {
     throw new Error(
-      '@ultimatelemon/eslint-config: rootDir is required when typeChecked is on. Pass import.meta.dirname.'
+      '@ultimatelemon-eu/eslint-config: rootDir is required when typeChecked is on. Pass import.meta.dirname.'
     );
   }
 

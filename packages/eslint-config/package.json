@@ -1,5 +1,5 @@
 {
-  "name": "@ultimatelemon/eslint-config",
+  "name": "@ultimatelemon-eu/eslint-config",
   "version": "1.0.0",
   "description": "Shared ESLint configuration for UltimateLemon Next.js projects.",
   "license": "MIT",

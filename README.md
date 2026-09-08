@@ -1,13 +1,13 @@
 # packages
 
 Shared npm packages for UltimateLemon projects. One repository, published
-independently to the public npm registry under `@ultimatelemon`.
+independently to the public npm registry under `@ultimatelemon-eu`.
 
-| Package                                                        | For                                                  |
-| -------------------------------------------------------------- | ---------------------------------------------------- |
-| [`@ultimatelemon/prettier-config`](./packages/prettier-config) | One formatting standard across every repository      |
-| [`@ultimatelemon/eslint-config`](./packages/eslint-config)     | Next.js + TypeScript linting, type-aware             |
-| [`@ultimatelemon/drizzle-migrate`](./packages/drizzle-migrate) | Drizzle migrations at container start, behind a lock |
+| Package                                                           | For                                                  |
+| ----------------------------------------------------------------- | ---------------------------------------------------- |
+| [`@ultimatelemon-eu/prettier-config`](./packages/prettier-config) | One formatting standard across every repository      |
+| [`@ultimatelemon-eu/eslint-config`](./packages/eslint-config)     | Next.js + TypeScript linting, type-aware             |
+| [`@ultimatelemon-eu/drizzle-migrate`](./packages/drizzle-migrate) | Drizzle migrations at container start, behind a lock |
 
 ## Why one repository
 
@@ -22,7 +22,7 @@ publish workflow compares each package against npm and publishes only what is
 not there yet, with provenance. There is no changeset tooling and no release
 branch.
 
-`NPM_TOKEN` is the only secret, an automation token for the `@ultimatelemon`
+`NPM_TOKEN` is the only secret, an automation token for the `@ultimatelemon-eu`
 scope.
 
 ## Getting started

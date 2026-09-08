@@ -1,5 +1,5 @@
 {
-  "name": "@ultimatelemon/drizzle-migrate",
+  "name": "@ultimatelemon-eu/drizzle-migrate",
   "version": "1.0.0",
   "description": "Run Drizzle migrations at container start, behind a Postgres advisory lock.",
   "license": "MIT",

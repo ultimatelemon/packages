@@ -1,16 +1,16 @@
-# @ultimatelemon/eslint-config
+# @ultimatelemon-eu/eslint-config
 
 Next.js core-web-vitals, type-aware TypeScript rules, and `eslint-config-prettier`
 last so formatting never fights the linter.
 
 ```bash
-npm install -D @ultimatelemon/eslint-config eslint eslint-config-next \
+npm install -D @ultimatelemon-eu/eslint-config eslint eslint-config-next \
   eslint-config-prettier typescript-eslint
 ```
 
 ```js
 // eslint.config.mjs
-import { config } from '@ultimatelemon/eslint-config';
+import { config } from '@ultimatelemon-eu/eslint-config';
 
 export default config({ rootDir: import.meta.dirname });
 ```

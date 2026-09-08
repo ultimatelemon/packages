@@ -1,15 +1,15 @@
-# @ultimatelemon/drizzle-migrate
+# @ultimatelemon-eu/drizzle-migrate
 
 Applies Drizzle migrations behind a Postgres advisory lock, so a container can
 migrate on start without two replicas racing.
 
 ```bash
-npm install @ultimatelemon/drizzle-migrate
+npm install @ultimatelemon-eu/drizzle-migrate
 ```
 
 ```ts
 // src/db/migrate.ts
-import { runMigrationsCli } from '@ultimatelemon/drizzle-migrate';
+import { runMigrationsCli } from '@ultimatelemon-eu/drizzle-migrate';
 
 await runMigrationsCli({ lockKey: 4178233902n });
 ```
