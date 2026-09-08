@@ -19,11 +19,34 @@ setup and dependency bot; it needs a directory.
 
 Bump the `version` in a package's `package.json` and merge to `main`. The
 publish workflow compares each package against npm and publishes only what is
-not there yet, with provenance. There is no changeset tooling and no release
-branch.
+not there yet. There is no changeset tooling and no release branch.
 
-`NPM_TOKEN` is the only secret, an automation token for the `@ultimatelemon-eu`
-scope.
+Publishing runs on npm trusted publishing: GitHub Actions authenticates over
+OIDC with a short-lived token, so there is no `NPM_TOKEN` to store or rotate,
+and provenance is attached automatically.
+
+### First publish of a new package
+
+A trusted publisher can only be attached to a package that exists, so the
+first version goes out by hand:
+
+```bash
+npm login
+npm publish --workspace @ultimatelemon-eu/<name> --access public
+```
+
+Then on npmjs.com, under the package's settings, add a trusted publisher:
+
+| Field      | Value           |
+| ---------- | --------------- |
+| Provider   | GitHub Actions  |
+| Owner      | `ultimatelemon` |
+| Repository | `packages`      |
+| Workflow   | `publish.yml`   |
+
+From then on CI publishes it without any credential. A trusted publisher
+cannot be edited afterwards, only deleted and recreated, so the workflow
+filename has to match exactly.
 
 ## Getting started
 
