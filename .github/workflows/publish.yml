@@ -40,7 +40,7 @@ jobs:
               echo "$name@$version is already on npm"
             else
               echo "publishing $name@$version"
-              npm publish --workspace "$name" --provenance --access public
+              npm publish --workspace "$name" --access public
               published=$((published + 1))
             fi
           done
