@@ -24,6 +24,13 @@ export default config({ rootDir: import.meta.dirname });
 | `typeChecked` | `true`  | Turn off for a project without a TypeScript project graph |
 | `extra`       | `[]`    | Config objects appended before `eslint-config-prettier`   |
 
+## TypeScript versions
+
+The `typescript` peer stops below 6.1, because that is where
+`typescript-eslint` stops. A wider range lets npm pick a TypeScript the parser
+cannot use, and the install fails with a peer conflict that points at this
+package rather than at the real constraint.
+
 ## What it turns on
 
 `no-explicit-any`, `no-floating-promises`, `await-thenable` and
