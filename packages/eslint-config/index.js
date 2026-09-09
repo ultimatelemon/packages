@@ -57,7 +57,6 @@ export function config({
           'error',
           { checksVoidReturn: { attributes: false } }
         ],
-        '@typescript-eslint/explicit-module-boundary-types': 'warn',
         '@typescript-eslint/no-unused-vars': [
           'error',
           { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
@@ -72,17 +71,9 @@ export function config({
     },
 
     {
-      files: ['**/*.tsx'],
-      rules: {
-        '@typescript-eslint/explicit-module-boundary-types': 'off'
-      }
-    },
-
-    {
       files: RELAXED_FILES,
       rules: {
-        'no-console': 'off',
-        '@typescript-eslint/explicit-module-boundary-types': 'off'
+        'no-console': 'off'
       }
     },
 

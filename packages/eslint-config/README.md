@@ -38,9 +38,11 @@ React code is written, and flagging it in every handler drowns the cases the
 rule is actually for: a promise in a condition, or dropped in a void context
 outside JSX.
 
-`.tsx` files are exempt from the return-type rule: a component's return type is
-obvious from its body, and annotating it means importing `JSX` in every file
-for no signal. Plain `.ts` exports still get the nudge.
+There is no `explicit-module-boundary-types`. It produced 47 findings in one
+repository and 22 in another, none of which anyone was going to act on, and a
+warning that never becomes an error is noise. TypeScript infers return types,
+and the unsafe-value rules already catch the cases where that inference is
+hiding an `any`.
 
 Tests, seeds, migrators and scripts are exempt from the console and return-type
 rules.
