@@ -33,6 +33,11 @@ silently, and `any` tends to appear exactly where types matter most.
 `explicit-module-boundary-types` is a warning on exports only, and
 `no-console` allows `warn`, `error` and `info`.
 
+`no-misused-promises` does not check JSX attributes. An async `onClick` is how
+React code is written, and flagging it in every handler drowns the cases the
+rule is actually for: a promise in a condition, or dropped in a void context
+outside JSX.
+
 `.tsx` files are exempt from the return-type rule: a component's return type is
 obvious from its body, and annotating it means importing `JSX` in every file
 for no signal. Plain `.ts` exports still get the nudge.
