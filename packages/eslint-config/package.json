@@ -1,7 +1,7 @@
 {
   "name": "@ultimatelemon-eu/eslint-config",
-  "version": "1.0.4",
-  "description": "Shared ESLint configuration for UltimateLemon Next.js projects.",
+  "version": "1.1.0",
+  "description": "Shared ESLint configuration for UltimateLemon projects: Next.js by default, or a Next-free base entry for JS/TS projects.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,10 +11,13 @@
   "type": "module",
   "main": "index.js",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./base": "./base.js"
   },
   "files": [
-    "index.js"
+    "index.js",
+    "base.js",
+    "shared.js"
   ],
   "peerDependencies": {
     "eslint": ">=9",
@@ -22,6 +25,11 @@
     "eslint-config-prettier": ">=10",
     "typescript": ">=5 <6.1.0",
     "typescript-eslint": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "eslint-config-next": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"
