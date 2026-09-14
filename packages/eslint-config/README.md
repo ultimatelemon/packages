@@ -15,6 +15,37 @@ import { config } from '@ultimatelemon-eu/eslint-config';
 export default config({ rootDir: import.meta.dirname });
 ```
 
+## Non-Next projects
+
+Node services, Cloudflare Workers and libraries import from the `/base` entry.
+Same rules and Prettier compatibility, without the Next layer — so
+`eslint-config-next` (an optional peer) need not be installed.
+
+```bash
+npm install -D @ultimatelemon-eu/eslint-config eslint \
+  eslint-config-prettier typescript-eslint typescript
+```
+
+```js
+// eslint.config.mjs — a type-aware TS project
+import { config } from '@ultimatelemon-eu/eslint-config/base';
+
+export default config({ rootDir: import.meta.dirname });
+```
+
+```js
+// eslint.config.mjs — a plain-JS project (no TypeScript project graph)
+import { config } from '@ultimatelemon-eu/eslint-config/base';
+import globals from 'globals';
+
+export default config({
+  typeChecked: false,
+  extra: [{ languageOptions: { globals: { ...globals.node } } }]
+});
+```
+
+Both entries take the same options.
+
 ## Options
 
 | Option        | Default | Does                                                      |
