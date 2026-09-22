@@ -3,11 +3,12 @@
 Shared npm packages for UltimateLemon projects. One repository, published
 independently to the public npm registry under `@ultimatelemon-eu`.
 
-| Package                                                           | For                                                  |
-| ----------------------------------------------------------------- | ---------------------------------------------------- |
-| [`@ultimatelemon-eu/prettier-config`](./packages/prettier-config) | One formatting standard across every repository      |
-| [`@ultimatelemon-eu/eslint-config`](./packages/eslint-config)     | Next.js + TypeScript linting, type-aware             |
-| [`@ultimatelemon-eu/drizzle-migrate`](./packages/drizzle-migrate) | Drizzle migrations at container start, behind a lock |
+| Package                                                           | For                                                          |
+| ----------------------------------------------------------------- | ------------------------------------------------------------ |
+| [`@ultimatelemon-eu/prettier-config`](./packages/prettier-config) | One formatting standard across every repository              |
+| [`@ultimatelemon-eu/eslint-config`](./packages/eslint-config)     | Next.js + TypeScript linting, type-aware                     |
+| [`@ultimatelemon-eu/drizzle-migrate`](./packages/drizzle-migrate) | Drizzle migrations at container start, behind a lock         |
+| [`@ultimatelemon-eu/datetime`](./packages/datetime)               | Dates in any locale and time zone, same on server and client |
 
 ## Why one repository
 
@@ -55,4 +56,5 @@ npm install
 npm run build
 npm run format:check
 npm run typecheck
+npm test
 ```
