@@ -1,0 +1,36 @@
+{
+  "name": "@ultimatelemon-eu/datetime",
+  "version": "1.0.0",
+  "description": "Date and time formatting for any locale and time zone, identical on server and client. Intl only, no dependencies.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ultimatelemon/packages.git",
+    "directory": "packages/datetime"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "TZ=UTC vitest run && TZ=Asia/Tokyo vitest run && TZ=America/Los_Angeles vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
