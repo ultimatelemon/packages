@@ -12,7 +12,7 @@
     "build": "npm run build --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit --project packages/drizzle-migrate && tsc --noEmit --project packages/datetime/tsconfig.test.json",
+    "typecheck": "tsc --noEmit --project packages/drizzle/tsconfig.test.json && tsc --noEmit --project packages/datetime/tsconfig.test.json",
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
