@@ -9,6 +9,7 @@ independently to the public npm registry under `@ultimatelemon-eu`.
 | [`@ultimatelemon-eu/eslint-config`](./packages/eslint-config)     | Next.js + TypeScript linting, type-aware                       |
 | [`@ultimatelemon-eu/drizzle`](./packages/drizzle)                 | Drizzle client, Postgres errors, migrations at container start |
 | [`@ultimatelemon-eu/datetime`](./packages/datetime)               | Dates in any locale and time zone, same on server and client   |
+| [`@ultimatelemon-eu/auth`](./packages/auth)                       | Zitadel login: OIDC code flow with PKCE, signed session cookie |
 
 ## Why one repository
 

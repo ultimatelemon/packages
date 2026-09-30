@@ -1,0 +1,40 @@
+{
+  "name": "@ultimatelemon-eu/auth",
+  "version": "1.0.0",
+  "description": "Zitadel login for UltimateLemon apps: OIDC code flow with PKCE and a signed session cookie. Framework-agnostic, with cookies handed back to the caller.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ultimatelemon/packages.git",
+    "directory": "packages/auth"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "jose": "^6.2.12",
+    "openid-client": "^6.8.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
