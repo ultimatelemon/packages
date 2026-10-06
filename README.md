@@ -10,6 +10,7 @@ independently to the public npm registry under `@ultimatelemon-eu`.
 | [`@ultimatelemon-eu/drizzle`](./packages/drizzle)                 | Drizzle client, Postgres errors, migrations at container start |
 | [`@ultimatelemon-eu/datetime`](./packages/datetime)               | Dates in any locale and time zone, same on server and client   |
 | [`@ultimatelemon-eu/auth`](./packages/auth)                       | Zitadel login: OIDC code flow with PKCE, signed session cookie |
+| [`@ultimatelemon-eu/mcp-http`](./packages/mcp-http)               | MCP over stateless Streamable HTTP, with health and base path  |
 
 ## Why one repository
 
