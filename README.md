@@ -12,6 +12,7 @@ independently to the public npm registry under `@ultimatelemon-eu`.
 | [`@ultimatelemon-eu/auth`](./packages/auth)                       | Zitadel login: OIDC code flow with PKCE, signed session cookie  |
 | [`@ultimatelemon-eu/mcp-http`](./packages/mcp-http)               | MCP over stateless Streamable HTTP, with health and base path   |
 | [`@ultimatelemon-eu/fetch-client`](./packages/fetch-client)       | fetch for rate-limited APIs: token bucket, Retry-After, retries |
+| [`@ultimatelemon-eu/crypto`](./packages/crypto)                   | Encrypt secrets at rest (AES-256-GCM), random tokens, SHA-256   |
 
 ## Why one repository
 
