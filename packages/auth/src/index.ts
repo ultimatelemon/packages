@@ -3,6 +3,7 @@ export type {
   Auth,
   AuthConfig,
   AuthErrorCode,
+  LoginOptions,
   LoginResult,
   LoginStart
 } from './auth.js';

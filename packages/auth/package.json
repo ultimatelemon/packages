@@ -1,6 +1,6 @@
 {
   "name": "@ultimatelemon-eu/auth",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Zitadel login for UltimateLemon apps: OIDC code flow with PKCE and a signed session cookie. Framework-agnostic, with cookies handed back to the caller.",
   "license": "MIT",
   "repository": {

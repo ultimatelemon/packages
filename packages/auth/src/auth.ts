@@ -19,6 +19,12 @@ export interface AuthConfig {
   sessionMaxAgeSeconds?: number;
 }
 
+export interface LoginOptions {
+  // Ask for credentials even when the identity provider has a session, e.g.
+  // before revealing a secret. Check `session.authTime` after the callback.
+  reauthenticate?: boolean;
+}
+
 export interface LoginStart {
   url: string;
   cookie: CookieToSet;
@@ -32,7 +38,10 @@ export interface LoginResult {
 
 export interface Auth {
   sessionCookieName: () => string;
-  startLogin: (returnTo?: string | null) => Promise<LoginStart>;
+  startLogin: (
+    returnTo?: string | null,
+    options?: LoginOptions
+  ) => Promise<LoginStart>;
   finishLogin: (
     requestUrl: string,
     flowCookieValue: string | undefined
@@ -158,7 +167,10 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
   const sessionCookieName = (): string =>
     hostCookieName(settings().cookiePrefix, 'session');
 
-  async function startLogin(returnTo?: string | null): Promise<LoginStart> {
+  async function startLogin(
+    returnTo?: string | null,
+    options: LoginOptions = {}
+  ): Promise<LoginStart> {
     const config = await configuration();
     const verifier = client.randomPKCECodeVerifier();
     const flow: Flow = {
@@ -174,7 +186,8 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
       code_challenge: await client.calculatePKCECodeChallenge(verifier),
       code_challenge_method: 'S256',
       state: flow.state,
-      nonce: flow.nonce
+      nonce: flow.nonce,
+      ...(options.reauthenticate ? { prompt: 'login' } : {})
     });
 
     return {
@@ -253,7 +266,11 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
     const session: Session = {
       sub: claims.sub,
       email: profile.email,
-      name: profile.name
+      name: profile.name,
+      authTime:
+        typeof claims.auth_time === 'number'
+          ? claims.auth_time
+          : Math.floor(Date.now() / 1000)
     };
     const k = keys();
     const token = await signSession(session, k);

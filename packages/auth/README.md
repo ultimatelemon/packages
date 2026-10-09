@@ -88,9 +88,24 @@ error is in `cause`.
 `readSession` checks signature, expiry, issuer and audience, and returns
 `null` on any doubt. It uses `jose` only, so a `proxy.ts` can call it.
 
-A session is `{ sub, email, name }`, where `sub` is the Zitadel user id.
+A session is `{ sub, email, name, authTime }`, where `sub` is the Zitadel
+user id and `authTime` (seconds) is when the user last entered credentials.
 Permissions do not belong in it: read them per request, so revoking access
 works immediately rather than when the token expires.
+
+### Sensitive actions
+
+Single sign-on can log a user in without asking for anything. Before showing
+a secret, require a recent `authTime` and otherwise send the user through
+Zitadel with `prompt=login`:
+
+```ts
+const fresh = session.authTime > Date.now() / 1000 - 10 * 60;
+if (!fresh) {
+  const { url, cookie } = await auth.startLogin(next, { reauthenticate: true });
+  // set cookie, redirect to url
+}
+```
 
 ## What it gets right
 

@@ -1,4 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { SignJWT } from 'jose';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('openid-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('openid-client')>();
+  return {
+    ...actual,
+    discovery: vi.fn(
+      async () =>
+        new actual.Configuration(
+          {
+            issuer: 'https://id.example',
+            authorization_endpoint: 'https://id.example/oauth/v2/authorize'
+          },
+          'id',
+          'secret'
+        )
+    )
+  };
+});
 
 import { AuthError, createAuth } from './auth.js';
 import { safeReturnTo } from './return-to.js';
@@ -31,10 +50,46 @@ describe('session', () => {
       { sub: 'u1', email: 'a@b.c', name: 'A' },
       keys
     );
-    await expect(verifySession(token, keys)).resolves.toEqual({
+    await expect(verifySession(token, keys)).resolves.toMatchObject({
       sub: 'u1',
       email: 'a@b.c',
       name: 'A'
+    });
+  });
+
+  it('carries authTime, defaulting to the signing time', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const given = await signSession(
+      { sub: 'u1', email: 'a@b.c', name: null, authTime: now - 600 },
+      keys,
+      now
+    );
+    await expect(verifySession(given, keys)).resolves.toMatchObject({
+      authTime: now - 600
+    });
+
+    const fresh = await signSession(
+      { sub: 'u1', email: 'a@b.c', name: null },
+      keys,
+      now
+    );
+    await expect(verifySession(fresh, keys)).resolves.toMatchObject({
+      authTime: now
+    });
+  });
+
+  it('reads a 1.0.0 session without auth_time as authenticated at iat', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const legacy = await new SignJWT({ email: 'a@b.c', name: null })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setSubject('u1')
+      .setIssuedAt(now - 30)
+      .setExpirationTime(now + 30)
+      .setIssuer(keys.audience)
+      .setAudience(keys.audience)
+      .sign(new TextEncoder().encode(keys.secret));
+    await expect(verifySession(legacy, keys)).resolves.toMatchObject({
+      authTime: now - 30
     });
   });
 
@@ -126,5 +181,16 @@ describe('createAuth', () => {
       }
     );
     await expect(auth.readSession(token)).resolves.toMatchObject({ sub: 'u1' });
+  });
+
+  it('asks for credentials again only when told to', async () => {
+    const plain = new URL((await auth.startLogin('/x')).url);
+    expect(plain.searchParams.get('prompt')).toBeNull();
+
+    const again = new URL(
+      (await auth.startLogin('/x', { reauthenticate: true })).url
+    );
+    expect(again.searchParams.get('prompt')).toBe('login');
+    expect(again.searchParams.get('code_challenge_method')).toBe('S256');
   });
 });

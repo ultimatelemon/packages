@@ -4,6 +4,9 @@ export interface Session {
   sub: string;
   email: string;
   name: string | null;
+  // When the user last entered credentials at the identity provider, in
+  // seconds. With single sign-on this can be older than the session itself.
+  authTime: number;
 }
 
 export interface SessionKeys {
@@ -24,11 +27,15 @@ function key(secret: string): Uint8Array {
 }
 
 export async function signSession(
-  session: Session,
+  session: Omit<Session, 'authTime'> & { authTime?: number },
   keys: SessionKeys,
   now: number = Math.floor(Date.now() / 1000)
 ): Promise<string> {
-  return new SignJWT({ email: session.email, name: session.name })
+  return new SignJWT({
+    email: session.email,
+    name: session.name,
+    auth_time: session.authTime ?? now
+  })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(session.sub)
     .setIssuedAt(now)
@@ -52,11 +59,14 @@ export async function verifySession(
     });
     const email = payload['email'];
     const name = payload['name'];
+    const authTime = payload['auth_time'];
     if (!payload.sub || typeof email !== 'string' || !email) return null;
     return {
       sub: payload.sub,
       email,
-      name: typeof name === 'string' && name ? name : null
+      name: typeof name === 'string' && name ? name : null,
+      // Sessions signed by 1.0.0 have no auth_time; their iat is the login.
+      authTime: typeof authTime === 'number' ? authTime : (payload.iat ?? 0)
     };
   } catch {
     return null;
