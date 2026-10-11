@@ -1,6 +1,6 @@
 {
   "name": "@ultimatelemon-eu/eslint-config",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Shared ESLint configuration for UltimateLemon projects: Next.js by default, or a Next-free base entry for JS/TS projects.",
   "license": "MIT",
   "repository": {

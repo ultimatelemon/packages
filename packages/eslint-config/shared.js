@@ -20,6 +20,15 @@ export const RELAXED_FILES = [
   '**/scripts/**'
 ];
 
+const TYPE_CHECKED_RULES = {
+  '@typescript-eslint/no-floating-promises': 'error',
+  '@typescript-eslint/await-thenable': 'error',
+  '@typescript-eslint/no-misused-promises': [
+    'error',
+    { checksVoidReturn: { attributes: false } }
+  ]
+};
+
 export function build({
   framework = [],
   rootDir,
@@ -51,12 +60,7 @@ export function build({
         : {}),
       rules: {
         '@typescript-eslint/no-explicit-any': 'error',
-        '@typescript-eslint/no-floating-promises': 'error',
-        '@typescript-eslint/await-thenable': 'error',
-        '@typescript-eslint/no-misused-promises': [
-          'error',
-          { checksVoidReturn: { attributes: false } }
-        ],
+        ...(typeChecked ? TYPE_CHECKED_RULES : {}),
         '@typescript-eslint/no-unused-vars': [
           'error',
           { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
