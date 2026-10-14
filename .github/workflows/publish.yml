@@ -6,6 +6,8 @@ on:
     paths: ['packages/**']
   workflow_dispatch:
 
+permissions: {}
+
 concurrency:
   group: publish
   cancel-in-progress: false
