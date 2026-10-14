@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit --project packages/drizzle/tsconfig.test.json && tsc --noEmit --project packages/datetime/tsconfig.test.json && tsc --noEmit --project packages/auth/tsconfig.test.json && tsc --noEmit --project packages/mcp-http/tsconfig.test.json && tsc --noEmit --project packages/fetch-client/tsconfig.test.json && tsc --noEmit --project packages/crypto/tsconfig.test.json",
-    "test": "npm run test --workspaces --if-present"
+    "test": "node --test test/*.test.mjs && npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
