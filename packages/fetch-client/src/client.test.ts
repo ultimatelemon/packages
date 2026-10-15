@@ -94,6 +94,20 @@ function json(
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+// Builds a real Response whose body is a ReadableStream that enqueues a
+// partial chunk and then errors, so that `response.body?.cancel()` on it
+// genuinely rejects (this is what Node 22 does for an already-errored
+// stream), instead of a mock that just resolves cancel() silently.
+function brokenResponse(status: number, headers: Record<string, string> = {}) {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"partial":'));
+      controller.error(new Error('stream reset mid-response'));
+    }
+  });
+  return new Response(body, { status, headers });
+}
+
 describe('createFetchClient', () => {
   it('sends headers and parses JSON', async () => {
     const fetch = vi.fn((_url: URL, init?: RequestInit) => {
@@ -149,6 +163,28 @@ describe('createFetchClient', () => {
     // The bucket is now blocked, so the next call fails without a request.
     await expect(client.get('/a')).rejects.toBeInstanceOf(RateLimitedError);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns a 429 with an errored body stream into RateLimitedError, not the raw stream error', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(brokenResponse(429, { 'retry-after': '7' }));
+    const client = createFetchClient({
+      baseUrl: 'https://x.test',
+      fetch,
+      rateLimit: { limit: 300, windowMs: 300_000, burst: 40, maxWaitMs: 1 }
+    });
+    await expect(client.get('/a')).rejects.toBeInstanceOf(RateLimitedError);
+  });
+
+  it('retries a 5xx with an errored body stream and resolves from the next attempt', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(brokenResponse(503))
+      .mockResolvedValueOnce(json(200, { n: 1 }));
+    const client = createFetchClient({ baseUrl: 'https://x.test', fetch });
+    await expect(client.get('/a')).resolves.toEqual({ n: 1 });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('does not retry a timeout', async () => {

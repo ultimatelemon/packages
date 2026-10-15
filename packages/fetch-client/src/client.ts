@@ -217,11 +217,14 @@ export function createFetchClient(options: FetchClientOptions): FetchClient {
           const wait =
             parseRetryAfter(response.headers.get('retry-after')) ?? 60_000;
           bucket?.block(wait);
-          await response.body?.cancel();
+          // Best-effort cleanup: cancel() on an already-errored stream rejects
+          // with that same error, which must not override the outcome below.
+          await response.body?.cancel().catch(() => {});
           throw new RateLimitedError(wait);
         }
         if (response.status >= 500 && attempt < retries) {
-          await response.body?.cancel();
+          // Best-effort cleanup: see the comment on the 429 path above.
+          await response.body?.cancel().catch(() => {});
           continue;
         }
         const body = await readBody(response);
