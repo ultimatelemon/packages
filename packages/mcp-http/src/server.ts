@@ -1,6 +1,7 @@
 import {
   createServer,
   type IncomingMessage,
+  type Server,
   type ServerResponse
 } from 'node:http';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -34,6 +35,19 @@ export interface McpHttpServer {
 
 const silent: Logger = { error: () => {} };
 
+// PKG-10: Node's `Server.close()` waits for every still-open connection to go
+// idle on its own; a keep-alive client that goes idle (or stays busy) *after*
+// close() has already fired its one-off `closeIdleConnections()` call is
+// never swept again, so the returned promise would never settle. We sweep
+// idle connections repeatedly and, as a last resort, force every remaining
+// connection closed after a fixed grace period - allowing in-flight requests
+// a chance to finish first. 5000ms mirrors `DEFAULT_CONNECTION_TIMEOUT_MS` in
+// packages/drizzle/src/client.ts and stays well under the grace period an
+// orchestrator (Dokploy/k8s) gives a process before SIGKILL (typically
+// 10-30s). This is intentionally internal and not exposed on `McpHttpOptions`.
+const FORCE_CLOSE_TIMEOUT_MS = 5000;
+const IDLE_SWEEP_INTERVAL_MS = 250;
+
 function normalizeBasePath(basePath = ''): string {
   const trimmed = basePath.replace(/\/+$/, '');
   if (!trimmed) return '';
@@ -50,6 +64,36 @@ function jsonRpcError(res: ServerResponse, status: number, message: string) {
     jsonrpc: '2.0',
     error: { code: -32000, message },
     id: null
+  });
+}
+
+// PKG-10: closes `http`, letting in-flight requests finish normally. A
+// one-off `closeIdleConnections()` call only catches connections that are
+// already idle at the exact moment close() runs; any connection that is
+// still mid-request at that moment, and only goes idle afterwards, would
+// otherwise never be swept, so we repeat the sweep on an interval instead. If
+// connections are still open once FORCE_CLOSE_TIMEOUT_MS has passed - e.g. a
+// keep-alive client that never goes idle - `closeAllConnections()`
+// force-closes whatever remains so the returned promise always settles and
+// the port is always released. Both timers are unref'd and are always
+// cleared once `http`'s own close callback fires, on every path (success,
+// forced, or error).
+function closeHttpServer(http: Server): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const sweep = setInterval(() => {
+      http.closeIdleConnections();
+    }, IDLE_SWEEP_INTERVAL_MS).unref();
+    const forceExit = setTimeout(() => {
+      http.closeAllConnections();
+    }, FORCE_CLOSE_TIMEOUT_MS).unref();
+
+    http.close((error) => {
+      clearInterval(sweep);
+      clearTimeout(forceExit);
+      if (error) reject(error);
+      else resolve();
+    });
+    http.closeIdleConnections();
   });
 }
 
@@ -131,10 +175,6 @@ export async function startMcpHttpServer(
   return {
     url: `http://${shownHost}:${String(port)}${base}/mcp`,
     port,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        http.close((error) => (error ? reject(error) : resolve()));
-        http.closeIdleConnections();
-      })
+    close: () => closeHttpServer(http)
   };
 }
