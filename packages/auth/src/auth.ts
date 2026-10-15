@@ -53,6 +53,7 @@ export interface Auth {
 
 export type AuthErrorCode =
   | 'flow_expired'
+  | 'discovery_failed'
   | 'exchange_failed'
   | 'no_identity'
   | 'profile_unreachable'
@@ -162,7 +163,7 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
         )
         .catch((error: unknown) => {
           discovered = null;
-          throw error;
+          throw new AuthError('discovery_failed', { cause: error });
         });
     }
     return discovered;

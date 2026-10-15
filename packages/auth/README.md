@@ -80,9 +80,11 @@ const session = await auth.readSession(
 );
 ```
 
-`finishLogin` throws an `AuthError` with a `code`: `flow_expired`,
-`exchange_failed`, `no_identity`, `profile_unreachable` or `no_email`. Catch
-it in the callback and show a page instead of a stack trace.
+`startLogin` and `finishLogin` throw an `AuthError` with a `code` on a
+discovery failure: `discovery_failed`. `finishLogin` additionally throws
+`flow_expired`, `exchange_failed`, `no_identity`, `profile_unreachable` or
+`no_email`. Catch it in the login route and the callback and show a page
+instead of a stack trace.
 
 The original error from the identity provider is in `cause` — for
 `exchange_failed` and `profile_unreachable` that can be a token-endpoint

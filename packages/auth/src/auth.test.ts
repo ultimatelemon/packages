@@ -19,6 +19,8 @@ vi.mock('openid-client', async (importOriginal) => {
   };
 });
 
+import * as client from 'openid-client';
+
 import { AuthError, createAuth, describeAuthError } from './auth.js';
 import { safeReturnTo } from './return-to.js';
 import { signSession, verifySession } from './session.js';
@@ -195,6 +197,75 @@ describe('createAuth', () => {
   });
 });
 
+// client.discovery() failures must be wrapped as AuthError('discovery_failed'),
+// never leaked as the raw underlying error, and the cache must reset so a later
+// call can retry successfully. Each test below uses its own fresh createAuth()
+// instance (instead of the shared `auth` above) because the shared instance's
+// discovery promise is already resolved and cached by earlier tests, so
+// mockRejectedValueOnce would have no effect on it.
+describe('createAuth - discovery failure handling', () => {
+  function freshAuth() {
+    return createAuth(() => ({
+      issuer: 'https://id.example',
+      clientId: 'id',
+      clientSecret: 'secret',
+      appUrl: 'https://app.example',
+      sessionSecret: 'x'.repeat(32),
+      cookiePrefix: 'cellar'
+    }));
+  }
+
+  it('wraps a discovery failure from startLogin as AuthError with code discovery_failed, not the raw error', async () => {
+    const instance = freshAuth();
+    const underlying = new Error('network down');
+    vi.mocked(client.discovery).mockRejectedValueOnce(underlying);
+
+    const promise = instance.startLogin('/x');
+    await expect(promise).rejects.toBeInstanceOf(AuthError);
+    await expect(promise).rejects.toMatchObject({
+      code: 'discovery_failed',
+      cause: underlying
+    });
+  });
+
+  it('wraps a discovery failure from finishLogin as AuthError with code discovery_failed, using a valid flow cookie so flow_expired is not triggered instead', async () => {
+    const instance = freshAuth();
+    vi.mocked(client.discovery).mockRejectedValueOnce(
+      new Error('network down')
+    );
+
+    const validFlowCookie = JSON.stringify({
+      state: 's',
+      nonce: 'n',
+      verifier: 'v',
+      returnTo: '/'
+    });
+
+    const promise = instance.finishLogin(
+      'https://app.example/api/auth/callback?code=x',
+      validFlowCookie
+    );
+    await expect(promise).rejects.toBeInstanceOf(AuthError);
+    await expect(promise).rejects.toMatchObject({ code: 'discovery_failed' });
+  });
+
+  it('retries discovery and succeeds on a later call after a prior discovery failure (cache is reset, not stuck on the failed attempt)', async () => {
+    const instance = freshAuth();
+    const discoveryMock = vi.mocked(client.discovery);
+    const callsBefore = discoveryMock.mock.calls.length;
+    discoveryMock.mockRejectedValueOnce(new Error('network down'));
+
+    await expect(instance.startLogin('/x')).rejects.toBeInstanceOf(AuthError);
+
+    // A later call on the very same instance must attempt discovery again
+    // (the mock's default implementation resolves) rather than replaying the
+    // same failed/cached attempt forever.
+    const result = await instance.startLogin('/x');
+    expect(typeof result.url).toBe('string');
+    expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
+  });
+});
+
 describe('describeAuthError', () => {
   it('returns name, code and message for an AuthError, and nothing else', () => {
     const error = new AuthError('no_identity');
@@ -219,6 +290,7 @@ describe('describeAuthError', () => {
 
   it.each([
     'flow_expired',
+    'discovery_failed',
     'exchange_failed',
     'no_identity',
     'profile_unreachable',
