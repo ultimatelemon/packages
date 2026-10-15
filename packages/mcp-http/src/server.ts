@@ -74,8 +74,20 @@ export async function startMcpHttpServer(
       enableJsonResponse: true
     });
     res.on('close', () => {
-      void transport.close();
-      void server.close();
+      // This listener is synchronous, so try/catch can't catch a later
+      // rejection; guard each call with its own .catch() instead and log it.
+      transport.close().catch((error: unknown) => {
+        logger.error(
+          { err: String(error), url: req.url },
+          'transport close failed'
+        );
+      });
+      server.close().catch((error: unknown) => {
+        logger.error(
+          { err: String(error), url: req.url },
+          'mcp server close failed'
+        );
+      });
     });
     await server.connect(transport);
     await transport.handleRequest(req, res);
