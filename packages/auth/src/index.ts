@@ -1,8 +1,9 @@
-export { AuthError, createAuth } from './auth.js';
+export { AuthError, createAuth, describeAuthError } from './auth.js';
 export type {
   Auth,
   AuthConfig,
   AuthErrorCode,
+  AuthErrorInfo,
   LoginOptions,
   LoginResult,
   LoginStart
