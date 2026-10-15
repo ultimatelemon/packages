@@ -1,5 +1,5 @@
 import { SignJWT } from 'jose';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('openid-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('openid-client')>();
@@ -263,6 +263,130 @@ describe('createAuth - discovery failure handling', () => {
     const result = await instance.startLogin('/x');
     expect(typeof result.url).toBe('string');
     expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
+  });
+});
+
+// The insecure-http gate must be default-deny: a plain-http issuer is only
+// ever allowed when the caller explicitly opts in via `allowInsecureHttp`,
+// AND `NODE_ENV` is not 'production'. In particular an unset NODE_ENV (very
+// common outside Next.js, e.g. scripts/workers) must never, by itself, open
+// the gate. Each test below creates its own fresh createAuth() instance for
+// the same reason as the discovery-failure-handling tests above: `discovered`
+// is cached per closure, so a shared instance would only ever call
+// client.discovery() once and later tests would just read the stale args.
+describe('createAuth - insecure http gate', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  function freshAuth(overrides: {
+    issuer: string;
+    allowInsecureHttp?: boolean;
+  }) {
+    return createAuth(() => ({
+      issuer: overrides.issuer,
+      clientId: 'id',
+      clientSecret: 'secret',
+      appUrl: 'https://app.example',
+      sessionSecret: 'x'.repeat(32),
+      cookiePrefix: 'cellar',
+      // Only set the field when the test cares about it, so we also cover
+      // the "field left unset entirely" shape, not just "set to false".
+      ...(overrides.allowInsecureHttp === undefined
+        ? {}
+        : { allowInsecureHttp: overrides.allowInsecureHttp })
+    }));
+  }
+
+  // The 5th argument to client.discovery() is `{ execute: [...] }` only when
+  // the gate is open; otherwise it must be `undefined`. Scoped to "the call
+  // this test triggered" (via the before-count) rather than just
+  // `mock.calls.at(-1)`, so a future regression where startLogin() stops
+  // reaching client.discovery() at all can't make a denial assertion pass
+  // vacuously on a previous test's leftover call args.
+  function discoveryExecuteArgOfNextCall(callsBefore: number): () => unknown {
+    return () => {
+      const discoveryMock = vi.mocked(client.discovery);
+      expect(discoveryMock.mock.calls.length).toBe(callsBefore + 1);
+      return discoveryMock.mock.calls[callsBefore]?.[4];
+    };
+  }
+
+  it('rejects a plain-http issuer when allowInsecureHttp is unset and NODE_ENV is undefined', async () => {
+    delete process.env.NODE_ENV;
+    const instance = freshAuth({ issuer: 'http://id.local' });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
+  });
+
+  it('rejects a plain-http issuer when allowInsecureHttp is unset and NODE_ENV is "test"', async () => {
+    process.env.NODE_ENV = 'test';
+    const instance = freshAuth({ issuer: 'http://id.local' });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
+  });
+
+  it('rejects a plain-http issuer when allowInsecureHttp is explicitly false', async () => {
+    delete process.env.NODE_ENV;
+    const instance = freshAuth({
+      issuer: 'http://id.local',
+      allowInsecureHttp: false
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
+  });
+
+  it('allows a plain-http issuer when allowInsecureHttp is true and NODE_ENV is not production (local dev)', async () => {
+    delete process.env.NODE_ENV;
+    const instance = freshAuth({
+      issuer: 'http://id.local',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toEqual({
+      execute: [client.allowInsecureRequests]
+    });
+  });
+
+  it('rejects a plain-http issuer when allowInsecureHttp is true but NODE_ENV is "production" (prod override wins even if the flag is left on)', async () => {
+    process.env.NODE_ENV = 'production';
+    const instance = freshAuth({
+      issuer: 'http://id.local',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
+  });
+
+  it('never opens the insecure gate for an https issuer, even when allowInsecureHttp is true and NODE_ENV is undefined', async () => {
+    delete process.env.NODE_ENV;
+    const instance = freshAuth({
+      issuer: 'https://id.example',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
   });
 });
 
