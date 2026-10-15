@@ -17,6 +17,10 @@ export interface AuthConfig {
   callbackPath?: string;
   scope?: string;
   sessionMaxAgeSeconds?: number;
+  // Accept a plain-http issuer (local dev only). Ignored whenever
+  // `NODE_ENV === 'production'`, so leaving this on by accident in a
+  // deployed environment does not re-enable plaintext OIDC traffic.
+  allowInsecureHttp?: boolean;
 }
 
 export interface LoginOptions {
@@ -132,6 +136,7 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
       callbackPath: '/api/auth/callback',
       scope: 'openid profile email',
       sessionMaxAgeSeconds: DEFAULT_MAX_AGE,
+      allowInsecureHttp: false,
       ...config
     };
   }
@@ -149,10 +154,15 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
     if (!discovered) {
       const s = settings();
       const issuer = new URL(s.issuer);
-      // A local Zitadel runs on plain http. Allowed only outside production,
-      // so a misconfigured http issuer in production fails loudly instead.
+      // A local Zitadel runs on plain http. Only allowed when the consumer
+      // opts in explicitly via `allowInsecureHttp` — a missing/unknown
+      // NODE_ENV must never open this up on its own (default-deny) — and
+      // never in production, regardless of that flag, so a misconfigured
+      // http issuer in production fails loudly instead.
       const insecure =
-        issuer.protocol === 'http:' && process.env.NODE_ENV !== 'production';
+        issuer.protocol === 'http:' &&
+        s.allowInsecureHttp === true &&
+        process.env.NODE_ENV !== 'production';
       discovered = client
         .discovery(
           issuer,
