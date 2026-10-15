@@ -80,10 +80,11 @@ const session = await auth.readSession(
 );
 ```
 
-`finishLogin` throws an `AuthError` with a `code`: `flow_expired`,
-`exchange_failed`, `no_identity`, `profile_unreachable` or `no_email`. Catch
-it in the callback and show a page instead of a stack trace; the original
-error is in `cause`.
+`startLogin` and `finishLogin` throw an `AuthError` with a `code` on a
+discovery failure: `discovery_failed`. `finishLogin` additionally throws
+`flow_expired`, `exchange_failed`, `no_identity`, `profile_unreachable` or
+`no_email`. Catch it in the login route and the callback and show a page
+instead of a stack trace; the original error is in `cause`.
 
 `readSession` checks signature, expiry, issuer and audience, and returns
 `null` on any doubt. It uses `jose` only, so a `proxy.ts` can call it.
