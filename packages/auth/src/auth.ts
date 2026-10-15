@@ -58,6 +58,11 @@ export type AuthErrorCode =
   | 'profile_unreachable'
   | 'no_email';
 
+/**
+ * `cause` (and `stack`) can carry the raw error from the identity provider,
+ * e.g. a token-endpoint response or userinfo claims. Do not log or render
+ * this error as-is; use `describeAuthError()` for a safe summary instead.
+ */
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
 
@@ -66,6 +71,22 @@ export class AuthError extends Error {
     this.name = 'AuthError';
     this.code = code;
   }
+}
+
+export interface AuthErrorInfo {
+  name: 'AuthError';
+  code: AuthErrorCode;
+  message: string;
+}
+
+/**
+ * Safe to log or render: unlike `error.cause`, this never carries the raw
+ * identity-provider response. Returns `null` for anything that is not an
+ * `AuthError`.
+ */
+export function describeAuthError(error: unknown): AuthErrorInfo | null {
+  if (!(error instanceof AuthError)) return null;
+  return { name: 'AuthError', code: error.code, message: error.message };
 }
 
 const DEFAULT_MAX_AGE = 14 * 24 * 60 * 60;
