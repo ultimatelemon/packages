@@ -21,7 +21,7 @@ vi.mock('openid-client', async (importOriginal) => {
 
 import * as client from 'openid-client';
 
-import { AuthError, createAuth } from './auth.js';
+import { AuthError, createAuth, describeAuthError } from './auth.js';
 import { safeReturnTo } from './return-to.js';
 import { signSession, verifySession } from './session.js';
 
@@ -263,5 +263,93 @@ describe('createAuth - discovery failure handling', () => {
     const result = await instance.startLogin('/x');
     expect(typeof result.url).toBe('string');
     expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
+  });
+});
+
+describe('describeAuthError', () => {
+  it('returns name, code and message for an AuthError, and nothing else', () => {
+    const error = new AuthError('no_identity');
+    const info = describeAuthError(error);
+
+    expect(info).not.toBeNull();
+    expect(info).toEqual({
+      name: 'AuthError',
+      code: 'no_identity',
+      message: 'no_identity'
+    });
+    // Explicitly guard against leaking the internal `cause` or the stack
+    // trace, which may contain details not meant for API consumers.
+    expect(Object.hasOwn(info as object, 'cause')).toBe(false);
+    expect(Object.hasOwn(info as object, 'stack')).toBe(false);
+    expect(Object.keys(info as object).sort()).toEqual([
+      'code',
+      'message',
+      'name'
+    ]);
+  });
+
+  it.each([
+    'flow_expired',
+    'exchange_failed',
+    'no_identity',
+    'profile_unreachable',
+    'no_email'
+  ] as const)('reports message equal to the code for %s', (code) => {
+    const info = describeAuthError(new AuthError(code));
+    expect(info?.message).toBe(code);
+    expect(info?.code).toBe(code);
+  });
+
+  it('returns null for anything that is not an AuthError, without throwing', () => {
+    expect(describeAuthError(new Error('plain'))).toBeNull();
+    expect(describeAuthError('just a string')).toBeNull();
+    expect(describeAuthError(undefined)).toBeNull();
+    expect(describeAuthError(null)).toBeNull();
+    expect(describeAuthError(42)).toBeNull();
+    expect(
+      describeAuthError({ code: 'no_email', message: 'no_email' })
+    ).toBeNull();
+    expect(() => describeAuthError(undefined)).not.toThrow();
+  });
+
+  it('never exposes values carried in `cause`, even when they look like secrets', () => {
+    const secretToken = 'super-secret-token-material-xyz';
+    const error = new AuthError('exchange_failed', {
+      cause: {
+        response: { body: secretToken },
+        header: `Bearer ${secretToken}`
+      }
+    });
+
+    const info = describeAuthError(error);
+
+    expect(info).not.toBeNull();
+    // The secret must not surface anywhere in the serialized result...
+    expect(JSON.stringify(info)).not.toContain(secretToken);
+    // ...and the cause's own properties must not have been spread onto the
+    // result object either (only the three documented fields may exist).
+    expect(Object.keys(info as object).sort()).toEqual([
+      'code',
+      'message',
+      'name'
+    ]);
+    expect(Object.hasOwn(info as object, 'response')).toBe(false);
+    expect(Object.hasOwn(info as object, 'header')).toBe(false);
+  });
+
+  it('matches the `profile_unreachable` throw site and its cause as well', () => {
+    const secretToken = 'another-secret-value-123';
+    const error = new AuthError('profile_unreachable', {
+      cause: new Error(secretToken)
+    });
+
+    const info = describeAuthError(error);
+
+    expect(info).toEqual({
+      name: 'AuthError',
+      code: 'profile_unreachable',
+      message: 'profile_unreachable'
+    });
+    expect(JSON.stringify(info)).not.toContain(secretToken);
   });
 });

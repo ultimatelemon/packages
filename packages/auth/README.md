@@ -84,7 +84,32 @@ const session = await auth.readSession(
 discovery failure: `discovery_failed`. `finishLogin` additionally throws
 `flow_expired`, `exchange_failed`, `no_identity`, `profile_unreachable` or
 `no_email`. Catch it in the login route and the callback and show a page
-instead of a stack trace; the original error is in `cause`.
+instead of a stack trace.
+
+The original error from the identity provider is in `cause` — for
+`exchange_failed` and `profile_unreachable` that can be a token-endpoint
+response or userinfo claims (email, sub). Don't log or render `cause` (or the
+whole `AuthError`, which carries it) as-is. Use `describeAuthError()` for a
+safe summary instead:
+
+```ts
+import { describeAuthError } from '@ultimatelemon-eu/auth';
+
+try {
+  const result = await auth.finishLogin(request.url, flowCookie);
+  // ...set result.cookies, redirect to result.returnTo
+} catch (error) {
+  logger.error(describeAuthError(error), 'login failed');
+  // { name: 'AuthError', code: 'exchange_failed', message: 'exchange_failed' }
+}
+```
+
+| Function                   | Returns                                                        |
+| -------------------------- | -------------------------------------------------------------- |
+| `describeAuthError(error)` | `{ name, code, message }` for an `AuthError`, `null` otherwise |
+
+If a consumer needs the raw provider error (e.g. for a support ticket), read
+`error.cause` directly and redact it first.
 
 `readSession` checks signature, expiry, issuer and audience, and returns
 `null` on any doubt. It uses `jose` only, so a `proxy.ts` can call it.
