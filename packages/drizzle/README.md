@@ -54,6 +54,43 @@ Pool defaults: `max` from `$DATABASE_POOL_MAX` (10 when unset), and
 `connectionTimeoutMillis: 5000`. Without that timeout, `pg` waits forever for
 a database that does not answer.
 
+Three more defaults bound how long a connection can sit busy once it is
+open, so a stuck row lock or a forgotten open transaction cannot hold a pool
+connection (and the lock it took) forever:
+
+| Setting                               | Default | Why                                                                                      |
+| ------------------------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `lock_timeout`                        | `3000`  | How long a statement waits for a row/table lock (e.g. `.for('update')`) before giving up |
+| `statement_timeout`                   | `10000` | How long any single statement may run                                                    |
+| `idle_in_transaction_session_timeout` | `10000` | How long a transaction may sit open between statements before Postgres ends the session  |
+
+`lock_timeout` must stay strictly below `statement_timeout`: otherwise
+`statement_timeout` (`57014 query_canceled`) cancels a lock wait before
+`lock_timeout` (`55P03 lock_not_available`) gets the chance to fire, hiding
+the more specific error a caller would want to catch.
+
+These are plain `pg` `PoolConfig` fields, sent as Postgres startup
+parameters on every connection, so they apply for the life of the session —
+including a `.for('update')` row lock — without any `SET`/`SET LOCAL` query
+to set them. A project overrides or disables any of them the same way it
+already overrides `connectionTimeoutMillis`, through the `pool` option, e.g.
+`pool: { statement_timeout: false }` or `pool: { lock_timeout: 0 }`.
+
+A connection pooler running in transaction-pooling mode (e.g. PgBouncer) may
+reject or fail to persist unknown startup parameters per client session —
+that is a property of the pooler, not of this package, and worth checking
+against your own Postgres infrastructure.
+
+`idle_in_transaction_session_timeout` makes Postgres terminate the session
+server-side, which `pg` surfaces as an `'error'` event rather than a query
+rejection. Left unhandled, that is an unhandled `EventEmitter` error that
+crashes the process — for both a client sitting idle in the pool and a
+client checked out via `pool.connect()`/a transaction (`pg-pool` only keeps
+its own forwarding listener attached while a client is idle in the pool, not
+while it is checked out). `createDb` attaches a listener for both cases —
+`pool.on('error', ...)` and a per-client listener added on `pool`'s
+`'connect'` event — so this package's defaults cannot introduce that crash.
+
 `createDb` returns:
 
 | Member      | Does                                                      |
@@ -154,4 +191,6 @@ the sha256 of the migration file, the timestamp is `when` from
 ## Tests
 
 `npm test` runs the unit tests. With `TEST_DATABASE_URL` set it also runs a
-query and a real unique violation against that database.
+query, a real unique violation, a check that `lock_timeout` arrives as a
+session GUC, and a check that a client actually checked out of the pool
+keeps its own `'error'` listener, against that database.
