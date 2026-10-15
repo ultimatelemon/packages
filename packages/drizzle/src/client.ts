@@ -39,6 +39,15 @@ interface Cache<TSchema extends Schema> {
 
 const DEFAULT_POOL_MAX = 10;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 5000;
+// lock_timeout must stay strictly smaller than statement_timeout: otherwise
+// statement_timeout (57014 query_canceled) cancels a lock wait before
+// lock_timeout (55P03 lock_not_available) can fire, hiding the more specific
+// error a caller would want to recognise. A caller can already match on the
+// raw SQLSTATE via isPgError(error, '55P03'); ULT-3225 proposes adding
+// those codes to PgErrorCode, which this ordering is chosen to support.
+const DEFAULT_LOCK_TIMEOUT_MS = 3_000;
+const DEFAULT_STATEMENT_TIMEOUT_MS = 10_000;
+const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 10_000;
 
 function poolMax(): number {
   const max = Number(process.env.DATABASE_POOL_MAX);
@@ -69,8 +78,19 @@ export function createDb<TSchema extends Schema>(
       cache.pool = new Pool({
         max: poolMax(),
         connectionTimeoutMillis: DEFAULT_CONNECTION_TIMEOUT_MS,
+        statement_timeout: DEFAULT_STATEMENT_TIMEOUT_MS,
+        lock_timeout: DEFAULT_LOCK_TIMEOUT_MS,
+        idle_in_transaction_session_timeout:
+          DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS,
         ...poolConfig,
         connectionString: url
+      });
+      cache.pool.on('error', () => {
+        // A pooled client can be terminated server-side while idle (e.g.
+        // idle_in_transaction_session_timeout, 25P03); without a listener
+        // that is an unhandled EventEmitter error that crashes the process.
+        // pg removes and replaces the client on its own, so there is
+        // nothing else to do here.
       });
     }
     return cache.pool;
