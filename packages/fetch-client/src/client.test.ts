@@ -94,6 +94,18 @@ function json(
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+/** A Response whose body stream errors as soon as something tries to read it. */
+function brokenBody(status: number) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new Error('stream broken'));
+      }
+    }),
+    { status }
+  );
+}
+
 describe('createFetchClient', () => {
   it('sends headers and parses JSON', async () => {
     const fetch = vi.fn((_url: URL, init?: RequestInit) => {
@@ -167,5 +179,53 @@ describe('createFetchClient', () => {
       .mockResolvedValueOnce(json(200, []));
     const client = createFetchClient({ baseUrl: 'https://x.test', fetch });
     await expect(client.get('/a')).resolves.toEqual([]);
+  });
+
+  it('turns a failed body read on a non-OK response into an HttpError with the upstream status', async () => {
+    const fetch = vi.fn().mockResolvedValue(brokenBody(404));
+    const logger = { debug: vi.fn(), warn: vi.fn() };
+    const client = createFetchClient({
+      baseUrl: 'https://x.test',
+      fetch,
+      logger
+    });
+    const result = client.get('/a');
+    await expect(result).rejects.toBeInstanceOf(HttpError);
+    await expect(result).rejects.toMatchObject({ status: 404, body: null });
+    // 404 is not retried, so there is exactly one attempt and one log line.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        path: '/a',
+        attempt: 0,
+        err: expect.stringContaining('stream broken')
+      },
+      expect.any(String)
+    );
+  });
+
+  it('turns a failed body read on an OK response into a synthesized 502 HttpError, never the real 2xx status', async () => {
+    const fetch = vi.fn().mockResolvedValue(brokenBody(200));
+    const logger = { debug: vi.fn(), warn: vi.fn() };
+    const client = createFetchClient({
+      baseUrl: 'https://x.test',
+      fetch,
+      logger
+    });
+    const result = client.get('/a');
+    await expect(result).rejects.toBeInstanceOf(HttpError);
+    await expect(result).rejects.toMatchObject({ status: 502 });
+    // A 200 is never retried either way, so there is exactly one attempt.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        path: '/a',
+        attempt: 0,
+        err: expect.stringContaining('stream broken')
+      },
+      expect.any(String)
+    );
   });
 });
