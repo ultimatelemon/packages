@@ -26,7 +26,12 @@ const http = await startMcpHttpServer({
   port: Number(process.env.PORT ?? 3000)
 });
 
-process.once('SIGTERM', () => void http.close().then(() => process.exit(0)));
+process.once('SIGTERM', () => {
+  void http.close().then(
+    () => process.exit(0),
+    () => process.exit(0)
+  );
+});
 ```
 
 ## Options
