@@ -86,11 +86,31 @@ export function createDb<TSchema extends Schema>(
         connectionString: url
       });
       cache.pool.on('error', () => {
-        // A pooled client can be terminated server-side while idle (e.g.
-        // idle_in_transaction_session_timeout, 25P03); without a listener
-        // that is an unhandled EventEmitter error that crashes the process.
-        // pg removes and replaces the client on its own, so there is
-        // nothing else to do here.
+        // A client idling *in the pool* can be terminated server-side (e.g.
+        // idle_in_transaction_session_timeout, 25P03); pg-pool forwards
+        // that as an 'error' event on the Pool itself. Without a listener
+        // here that is an unhandled EventEmitter error that crashes the
+        // process. pg-pool removes and replaces the client on its own, so
+        // there is nothing else to do here.
+      });
+      cache.pool.on('connect', (client) => {
+        // pg-pool detaches its own forwarding listener from a client for
+        // the entire time it is checked out (pool.connect(), or
+        // drizzle-orm's transaction() helper, which calls that internally)
+        // and only re-attaches it once the client is released back to the
+        // pool. idle_in_transaction_session_timeout terminates the session
+        // (25P03) while the client sits idle *inside an open transaction* --
+        // exactly that checked-out window. Without a listener on the client
+        // itself, pg would emit 'error' directly on the bare client with
+        // nothing listening, crashing the process. 'connect' fires once per
+        // new physical connection, before it is first checked out, so a
+        // listener added here is a distinct function from pg-pool's own and
+        // survives every later checkout/release cycle.
+        client.on('error', () => {
+          // See the Pool-level listener above: a checked-out client
+          // terminated server-side would otherwise emit an unhandled
+          // 'error' directly on the client.
+        });
       });
     }
     return cache.pool;
