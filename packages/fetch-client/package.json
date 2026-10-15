@@ -1,6 +1,6 @@
 {
   "name": "@ultimatelemon-eu/fetch-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "fetch for rate-limited APIs: a token bucket that stays under the limit, Retry-After on 429, timeouts, one retry on 5xx, typed errors and logs without credentials.",
   "license": "MIT",
   "repository": {

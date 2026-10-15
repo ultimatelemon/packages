@@ -224,7 +224,22 @@ export function createFetchClient(options: FetchClientOptions): FetchClient {
           await response.body?.cancel();
           continue;
         }
-        const body = await readBody(response);
+        let body: unknown;
+        try {
+          body = await readBody(response);
+        } catch (error) {
+          logger.warn(
+            { path: logPath, attempt, err: String(error) },
+            'failed to read upstream body'
+          );
+          if (!response.ok) throw new HttpError(response.status, logPath, null);
+          throw new HttpError(
+            502,
+            logPath,
+            null,
+            'Upstream response body could not be read'
+          );
+        }
         if (!response.ok) throw new HttpError(response.status, logPath, body);
         return body as T;
       }
