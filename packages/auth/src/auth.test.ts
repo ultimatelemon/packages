@@ -290,6 +290,7 @@ describe('describeAuthError', () => {
 
   it.each([
     'flow_expired',
+    'discovery_failed',
     'exchange_failed',
     'no_identity',
     'profile_unreachable',
