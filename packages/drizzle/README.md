@@ -50,9 +50,19 @@ dynamic (`export const dynamic = 'force-dynamic'`).
 | `cacheKey`         | `'default'`     | Separates two databases in one process               |
 | _other_            |                 | Passed to `drizzle()`: `casing`, `logger`, and so on |
 
-Pool defaults: `max` from `$DATABASE_POOL_MAX` (10 when unset), and
-`connectionTimeoutMillis: 5000`. Without that timeout, `pg` waits forever for
-a database that does not answer.
+Pool defaults: `max` from `$DATABASE_POOL_MAX` (10 when unset, capped at 20),
+and `connectionTimeoutMillis: 5000`. Without that timeout, `pg` waits forever
+for a database that does not answer.
+
+A `$DATABASE_POOL_MAX` above 20 is clamped to 20 with a `console.warn` naming
+both the requested and the applied value. Postgres usually runs on its default
+`max_connections = 100`, part of which is reserved, and a rolling deploy has
+several instances alive at once — so 20 per instance is ample, while a typo
+(`10000` instead of `100`) cannot starve the server. It warns instead of
+throwing because the pool is built lazily on the first query: a throw would
+only show up at some later request, not at boot or on a health check. A
+project that really needs more sets it explicitly via `pool: { max: N }`,
+which is not clamped.
 
 Three more defaults bound how long a connection can sit busy once it is
 open, so a stuck row lock or a forgotten open transaction cannot hold a pool
