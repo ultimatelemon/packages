@@ -172,11 +172,16 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
           insecure ? { execute: [client.allowInsecureRequests] } : undefined
         )
         .catch((error: unknown) => {
-          // Only clear the cache if this attempt is still the current one.
-          // A newer attempt may have already replaced `discovered` by the
-          // time this rejection is processed (microtask timing), and a
-          // stale rejection must not clobber that newer entry — the same
-          // identity-check pattern as the INF-81 fix in accounts' oidc.ts.
+          // Only clear the cache if this attempt is still the current one —
+          // the same identity-check pattern as the INF-81 fix in accounts'
+          // oidc.ts. Here the check-and-assign above has no `await` in
+          // between and this catch is the only other writer of `discovered`,
+          // so a newer attempt can only exist once this one has already
+          // settled: `discovered === attempt` always holds when this runs
+          // today. The check is defensive hardening against that invariant
+          // ever changing (e.g. a future caching strategy with a real gap
+          // between the check and the assignment), not a fix for a race
+          // that is reachable through the public API right now.
           if (discovered === attempt) {
             discovered = null;
           }
