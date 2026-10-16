@@ -1,4 +1,5 @@
 import { SignJWT } from 'jose';
+import util from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('openid-client', async (importOriginal) => {
@@ -15,7 +16,13 @@ vi.mock('openid-client', async (importOriginal) => {
           'id',
           'secret'
         )
-    )
+    ),
+    // Left unmocked (no default implementation) on purpose: only the tests
+    // that exercise the token-exchange/claims/userinfo paths set these up
+    // per-test via `mockResolvedValueOnce`/`mockRejectedValueOnce`, the same
+    // way `discovery` is overridden below with `mockRejectedValueOnce`.
+    authorizationCodeGrant: vi.fn<typeof actual.authorizationCodeGrant>(),
+    fetchUserInfo: vi.fn<typeof actual.fetchUserInfo>()
   };
 });
 
@@ -30,6 +37,24 @@ const keys = {
   audience: 'https://app.example',
   maxAgeSeconds: 60
 };
+
+// Checks that a sensitive value carried by an upstream error never surfaces
+// through a thrown AuthError's serialized/logged form. Plain
+// `JSON.stringify(error)` would not be a meaningful check here, since Error
+// instances serialize to `{}` by default (their properties are not own
+// enumerable in the way JSON.stringify expects) -- walking
+// `Object.getOwnPropertyNames` is what actually inspects `cause`, `message`
+// and `stack`. `util.inspect` is checked too because Node prints `.cause`
+// there by default (e.g. in an uncaught-exception log or a naive
+// `console.error(error)`).
+function assertNoLeak(error: unknown, sensitiveValue: string): void {
+  const serialized = JSON.stringify(
+    error,
+    Object.getOwnPropertyNames(error as object)
+  );
+  expect(serialized).not.toContain(sensitiveValue);
+  expect(util.inspect(error, { depth: null })).not.toContain(sensitiveValue);
+}
 
 describe('safeReturnTo', () => {
   it.each([
@@ -215,24 +240,29 @@ describe('createAuth - discovery failure handling', () => {
     }));
   }
 
-  it('wraps a discovery failure from startLogin as AuthError with code discovery_failed, not the raw error', async () => {
+  it('wraps a discovery failure from startLogin as AuthError with code discovery_failed, exposing only a filtered cause (name/code), never the raw error', async () => {
     const instance = freshAuth();
     const underlying = new Error('network down');
     vi.mocked(client.discovery).mockRejectedValueOnce(underlying);
 
     const promise = instance.startLogin('/x');
     await expect(promise).rejects.toBeInstanceOf(AuthError);
+    // `underlying` has no `code` property, so the filtered cause must be
+    // exactly `{ name: 'Error' }` -- the raw Error instance must not leak
+    // through as-is.
     await expect(promise).rejects.toMatchObject({
       code: 'discovery_failed',
-      cause: underlying
+      cause: { name: 'Error' }
     });
+
+    const error = (await promise.catch((e: unknown) => e)) as AuthError;
+    expect(error.cause).not.toBe(underlying);
   });
 
   it('wraps a discovery failure from finishLogin as AuthError with code discovery_failed, using a valid flow cookie so flow_expired is not triggered instead', async () => {
     const instance = freshAuth();
-    vi.mocked(client.discovery).mockRejectedValueOnce(
-      new Error('network down')
-    );
+    const underlying = new Error('network down');
+    vi.mocked(client.discovery).mockRejectedValueOnce(underlying);
 
     const validFlowCookie = JSON.stringify({
       state: 's',
@@ -246,7 +276,84 @@ describe('createAuth - discovery failure handling', () => {
       validFlowCookie
     );
     await expect(promise).rejects.toBeInstanceOf(AuthError);
-    await expect(promise).rejects.toMatchObject({ code: 'discovery_failed' });
+    await expect(promise).rejects.toMatchObject({
+      code: 'discovery_failed',
+      cause: { name: 'Error' }
+    });
+
+    const error = (await promise.catch((e: unknown) => e)) as AuthError;
+    expect(error.cause).not.toBe(underlying);
+  });
+
+  it('filters a discovery failure cause down to name and code, never leaking the upstream error message into the thrown AuthError', async () => {
+    const instance = freshAuth();
+    const sensitive = 'token endpoint said: Bearer abc123-super-secret';
+    const upstream = Object.assign(new Error(sensitive), {
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    vi.mocked(client.discovery).mockRejectedValueOnce(upstream);
+
+    const error = (await instance
+      .startLogin('/x')
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.code).toBe('discovery_failed');
+    // Only `name` and `code` survive -- a real openid-client/oauth4webapi
+    // `code` constant is safe to keep, but the message (which may carry
+    // response bodies or token material) must not.
+    expect(error.cause).toEqual({
+      name: 'Error',
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    assertNoLeak(error, sensitive);
+  });
+
+  it('wraps an invalid issuer URL as AuthError("discovery_failed") with a filtered cause, instead of letting the raw URL-parsing TypeError escape', async () => {
+    const instance = createAuth(() => ({
+      issuer: 'not a valid url',
+      clientId: 'id',
+      clientSecret: 'secret',
+      appUrl: 'https://app.example',
+      sessionSecret: 'x'.repeat(32),
+      cookiePrefix: 'cellar'
+    }));
+
+    const error = (await instance
+      .startLogin('/x')
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.code).toBe('discovery_failed');
+    // `new URL(...)` throws a `TypeError` (Node happens to also set a
+    // `code`, but that's an implementation detail we don't want to pin to) --
+    // either way, only `name`/`code` may survive, never the raw TypeError
+    // instance (which would carry the invalid issuer value in its message).
+    expect(error.cause).toMatchObject({ name: 'TypeError' });
+    expect(
+      Object.keys(error.cause as object).every((key) =>
+        ['name', 'code'].includes(key)
+      )
+    ).toBe(true);
+  });
+
+  // Scoped to startLogin()'s call to configuration(): this only shows that
+  // `settings()`/`resolve()` throwing on the discovery path is not mistaken
+  // for a discovery failure. It does not claim this holds for every step of
+  // finishLogin() -- e.g. a `resolve()` throw surfacing while building the
+  // callback URL inside the token-exchange try/catch is a separate,
+  // pre-existing concern, split off separately.
+  it("does not treat the consumer's own config function throwing as a discovery failure: the raw error propagates unwrapped", async () => {
+    const instance = createAuth(() => {
+      throw new Error('OIDC_ISSUER is not set');
+    });
+
+    await expect(instance.startLogin('/x')).rejects.toThrow(
+      'OIDC_ISSUER is not set'
+    );
+    await expect(instance.startLogin('/x')).rejects.not.toBeInstanceOf(
+      AuthError
+    );
   });
 
   it('retries discovery and succeeds on a later call after a prior discovery failure (cache is reset, not stuck on the failed attempt)', async () => {
@@ -263,6 +370,203 @@ describe('createAuth - discovery failure handling', () => {
     const result = await instance.startLogin('/x');
     expect(typeof result.url).toBe('string');
     expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
+  });
+});
+
+// Beyond discovery, three more openid-client/oauth4webapi call sites can
+// throw upstream errors during finishLogin(): the token exchange, reading
+// claims off the resulting tokens, and (when claims carry no email) the
+// userinfo fallback. Each must be wrapped the same way discovery is above:
+// a typed AuthError whose `cause` is filtered down to `{ name, code? }`,
+// never the raw upstream error. Each test below uses its own fresh
+// createAuth() instance for the same reason as the discovery-failure-handling
+// tests above (a fresh, not-yet-resolved `discovered` promise), even though
+// `authorizationCodeGrant`/`fetchUserInfo` are shared mocks across instances
+// -- `mockResolvedValueOnce`/`mockRejectedValueOnce` only ever apply to the
+// very next call, which is the one this test triggers.
+describe('createAuth - finishLogin cause filtering and success path', () => {
+  function freshAuth() {
+    return createAuth(() => ({
+      issuer: 'https://id.example',
+      clientId: 'id',
+      clientSecret: 'secret',
+      appUrl: 'https://app.example',
+      sessionSecret: 'x'.repeat(32),
+      cookiePrefix: 'cellar'
+    }));
+  }
+
+  function validFlowCookie(): string {
+    return JSON.stringify({
+      state: 's',
+      nonce: 'n',
+      verifier: 'v',
+      returnTo: '/'
+    });
+  }
+
+  it('filters a token-exchange failure cause down to name and code, never leaking the upstream error message into the thrown AuthError', async () => {
+    const instance = freshAuth();
+    const sensitive = 'token endpoint said: Bearer abc123-super-secret';
+    const upstream = Object.assign(new Error(sensitive), {
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    vi.mocked(client.authorizationCodeGrant).mockRejectedValueOnce(upstream);
+
+    const error = (await instance
+      .finishLogin(
+        'https://app.example/api/auth/callback?code=x',
+        validFlowCookie()
+      )
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.code).toBe('exchange_failed');
+    expect(error.cause).toEqual({
+      name: 'Error',
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    assertNoLeak(error, sensitive);
+  });
+
+  // A rejection value that is not an `Error` instance at all (a plain object,
+  // as some OAuth libraries reject with the parsed error-response body
+  // directly) is the most leak-prone shape: there is no `.name`/`.code` to
+  // fall back to, only `typeof`. This exercises the `describeCause()` branch
+  // the other tests in this block never reach, since they all reject with a
+  // real `Error`.
+  it('falls back to `{ name: typeof error }` for a non-Error rejection, never spreading its properties into the cause', async () => {
+    const instance = freshAuth();
+    const sensitive = 'secret-access-token-value';
+    const upstream = {
+      error: 'invalid_grant',
+      access_token: sensitive
+    };
+    vi.mocked(client.authorizationCodeGrant).mockRejectedValueOnce(upstream);
+
+    const error = (await instance
+      .finishLogin(
+        'https://app.example/api/auth/callback?code=x',
+        validFlowCookie()
+      )
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.code).toBe('exchange_failed');
+    expect(error.cause).toEqual({ name: 'object' });
+    assertNoLeak(error, sensitive);
+  });
+
+  it('filters a tokens.claims() failure cause down to name and code (no_identity), never leaking the upstream error message into the thrown AuthError', async () => {
+    const instance = freshAuth();
+    const sensitive = 'id token said: Bearer abc123-super-secret';
+    const upstream = Object.assign(new Error(sensitive), {
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    vi.mocked(client.authorizationCodeGrant).mockResolvedValueOnce({
+      access_token: 'at',
+      claims: () => {
+        throw upstream;
+      }
+    } as unknown as client.TokenEndpointResponse &
+      client.TokenEndpointResponseHelpers);
+
+    const error = (await instance
+      .finishLogin(
+        'https://app.example/api/auth/callback?code=x',
+        validFlowCookie()
+      )
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    // No new AuthErrorCode is introduced for this: it reuses the existing
+    // `no_identity` code, which previously only covered a missing `sub`.
+    expect(error.code).toBe('no_identity');
+    expect(error.cause).toEqual({
+      name: 'Error',
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    assertNoLeak(error, sensitive);
+  });
+
+  it('filters a userinfo-fetch failure cause down to name and code (profile_unreachable), never leaking the upstream error message into the thrown AuthError', async () => {
+    const instance = freshAuth();
+    const sensitive = 'userinfo endpoint said: Bearer abc123-super-secret';
+    const upstream = Object.assign(new Error(sensitive), {
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    // No email on the id-token claims forces the userinfo fallback, which is
+    // the call site under test here.
+    vi.mocked(client.authorizationCodeGrant).mockResolvedValueOnce({
+      access_token: 'at',
+      claims: () => ({ sub: 'u1' })
+    } as unknown as client.TokenEndpointResponse &
+      client.TokenEndpointResponseHelpers);
+    vi.mocked(client.fetchUserInfo).mockRejectedValueOnce(upstream);
+
+    const error = (await instance
+      .finishLogin(
+        'https://app.example/api/auth/callback?code=x',
+        validFlowCookie()
+      )
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.code).toBe('profile_unreachable');
+    expect(error.cause).toEqual({
+      name: 'Error',
+      code: 'OAUTH_RESPONSE_BODY_ERROR'
+    });
+    assertNoLeak(error, sensitive);
+  });
+
+  it('completes the happy path when claims already carry an email, skipping the userinfo fallback entirely', async () => {
+    const instance = freshAuth();
+    const authTime = Math.floor(Date.now() / 1000) - 120;
+    const fetchUserInfoCallsBefore = vi.mocked(client.fetchUserInfo).mock.calls
+      .length;
+    vi.mocked(client.authorizationCodeGrant).mockResolvedValueOnce({
+      access_token: 'at',
+      claims: () => ({
+        sub: 'u1',
+        email: 'a@b.c',
+        name: 'A',
+        auth_time: authTime
+      })
+    } as unknown as client.TokenEndpointResponse &
+      client.TokenEndpointResponseHelpers);
+
+    const result = await instance.finishLogin(
+      'https://app.example/api/auth/callback?code=x',
+      validFlowCookie()
+    );
+
+    // An email already present on the id-token claims must short-circuit the
+    // userinfo fallback -- it must not be called at all.
+    expect(vi.mocked(client.fetchUserInfo).mock.calls.length).toBe(
+      fetchUserInfoCallsBefore
+    );
+    expect(result.session).toEqual({
+      sub: 'u1',
+      email: 'a@b.c',
+      name: 'A',
+      authTime
+    });
+    expect(result.returnTo).toBe('/');
+    // AC7: the success path must leave session, token and profile unchanged
+    // end-to-end. A bare `toHaveLength(2)` only proves two cookies exist, not
+    // that the right cookie carries the right (still-valid) JWT, so assert
+    // the cookie names explicitly and round-trip-decode the session cookie's
+    // actual token value back through the instance's own readSession(),
+    // rather than trusting the in-memory `result.session` object alone.
+    expect(result.cookies).toHaveLength(2);
+    expect(result.cookies[0].name).toBe(instance.flowCookieName());
+    expect(result.cookies[0].value).toBe('');
+    expect(result.cookies[0].options.maxAge).toBe(0);
+    expect(result.cookies[1].name).toBe(instance.sessionCookieName());
+    await expect(
+      instance.readSession(result.cookies[1].value)
+    ).resolves.toEqual(result.session);
   });
 });
 

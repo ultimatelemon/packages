@@ -64,9 +64,11 @@ export type AuthErrorCode =
   | 'no_email';
 
 /**
- * `cause` (and `stack`) can carry the raw error from the identity provider,
- * e.g. a token-endpoint response or userinfo claims. Do not log or render
- * this error as-is; use `describeAuthError()` for a safe summary instead.
+ * `cause` is a filtered `{ name, code? }` summary of whatever failed
+ * upstream (see `describeCause()`), never the raw identity-provider error —
+ * it is safe to log or render as-is. Use `describeAuthError()` if you only
+ * want the flat `{ name, code, message }` shape and don't need `cause` at
+ * all.
  */
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
@@ -85,13 +87,36 @@ export interface AuthErrorInfo {
 }
 
 /**
- * Safe to log or render: unlike `error.cause`, this never carries the raw
- * identity-provider response. Returns `null` for anything that is not an
- * `AuthError`.
+ * Safe to log or render: a flat `{ name, code, message }` summary of an
+ * `AuthError`, with no `cause` field. `error.cause` on an `AuthError` is
+ * itself already filtered down to `{ name, code? }` by `describeCause()` (see
+ * below), so logging it directly is also safe — this function remains the
+ * recommended way to get a summary that also covers codes with no `cause` at
+ * all (`flow_expired`, `no_email`). Returns `null` for anything that is not
+ * an `AuthError`.
  */
 export function describeAuthError(error: unknown): AuthErrorInfo | null {
   if (!(error instanceof AuthError)) return null;
   return { name: 'AuthError', code: error.code, message: error.message };
+}
+
+/**
+ * Filters an unknown thrown value down to an allowlist safe to put in
+ * `AuthError.cause`: the error's `name`, and its `code` if present and a
+ * string. Never the `message` or any other property — those are where
+ * openid-client/oauth4webapi errors carry the token-endpoint or userinfo
+ * response body, up to and including token material. `code` itself is safe:
+ * on these error classes it is a fixed library constant (e.g.
+ * `OAUTH_RESPONSE_BODY_ERROR`), not something taken from the response.
+ * Mirrors `describeOidcError()` in accounts' own (separate) copy of this
+ * logic.
+ */
+function describeCause(error: unknown): { name: string; code?: string } {
+  if (!(error instanceof Error)) return { name: typeof error };
+  const name = error.name;
+  const code =
+    'code' in error && typeof error.code === 'string' ? error.code : undefined;
+  return code !== undefined ? { name, code } : { name };
 }
 
 const DEFAULT_MAX_AGE = 14 * 24 * 60 * 60;
@@ -152,8 +177,21 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
 
   function configuration(): Promise<client.Configuration> {
     if (!discovered) {
+      // `settings()` runs the consumer's own config function (e.g. reading
+      // env vars) — a throw from there (a missing env var) is the
+      // consumer's problem, not a discovery failure, so it must propagate
+      // unchanged rather than being reported as `discovery_failed`.
       const s = settings();
-      const issuer = new URL(s.issuer);
+
+      let issuer: URL;
+      try {
+        issuer = new URL(s.issuer);
+      } catch (error) {
+        throw new AuthError('discovery_failed', {
+          cause: describeCause(error)
+        });
+      }
+
       // A local Zitadel runs on plain http. Only allowed when the consumer
       // opts in explicitly via `allowInsecureHttp` — a missing/unknown
       // NODE_ENV must never open this up on its own (default-deny) — and
@@ -173,7 +211,9 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
         )
         .catch((error: unknown) => {
           discovered = null;
-          throw new AuthError('discovery_failed', { cause: error });
+          throw new AuthError('discovery_failed', {
+            cause: describeCause(error)
+          });
         });
     }
     return discovered;
@@ -276,10 +316,19 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
         }
       );
     } catch (error) {
-      throw new AuthError('exchange_failed', { cause: error });
+      throw new AuthError('exchange_failed', { cause: describeCause(error) });
     }
 
-    const claims = tokens.claims();
+    let claims: client.IDToken | undefined;
+    try {
+      claims = tokens.claims();
+    } catch (error) {
+      // Reuses the existing `no_identity` code rather than adding a new
+      // `AuthErrorCode`: it already means "no usable identity came out of
+      // the token exchange", which covers both a missing `sub` (below) and
+      // a token whose claims could not be read at all.
+      throw new AuthError('no_identity', { cause: describeCause(error) });
+    }
     if (!claims?.sub) throw new AuthError('no_identity');
 
     let profile: { email: string | null; name: string | null };
@@ -291,7 +340,9 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
         claims.sub
       );
     } catch (error) {
-      throw new AuthError('profile_unreachable', { cause: error });
+      throw new AuthError('profile_unreachable', {
+        cause: describeCause(error)
+      });
     }
     if (!profile.email) throw new AuthError('no_email');
 
