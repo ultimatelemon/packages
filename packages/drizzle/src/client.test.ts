@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createDb } from './client.js';
+import { createDb, DbCloseError } from './client.js';
 import { isUniqueViolation } from './errors.js';
 
 const schema = {};
@@ -246,6 +246,169 @@ describe('createDb', () => {
     await client.closeDb();
     expect(client.getPool()).not.toBe(before);
     await client.closeDb();
+  });
+
+  it('rejects with a DbCloseError carrying the underlying pg-pool failure as `cause` when pool.end() fails', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    // End the pool directly, outside of closeDb(), so the pool.end() call
+    // closeDb() makes internally hits an already-ended pg Pool. pg-pool
+    // rejects a second end() (e.g. "Called end on pool more than once"),
+    // which is the real-world case closeDb() must surface, not swallow.
+    await pool.end();
+
+    let caught: unknown;
+    try {
+      await client.closeDb();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DbCloseError);
+    const dbCloseError = caught as DbCloseError;
+    // The original pg-pool error must be reachable via `cause`, not
+    // discarded, and must not just be the DbCloseError pointing at itself.
+    // pg-pool's own message for ending an already-ended pool confirms this
+    // is the real underlying failure, not some unrelated stand-in error.
+    expect(dbCloseError.cause).toBeInstanceOf(Error);
+    expect(dbCloseError.cause).not.toBe(dbCloseError);
+    expect((dbCloseError.cause as Error).message).toMatch(
+      /Called end on pool more than once/
+    );
+  });
+
+  it('keeps serving the same pool from getPool() after a failed closeDb(), instead of silently opening a second one', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const poolBeforeFailedClose = client.getPool();
+    // Same double-end setup as above: makes the internal pool.end() inside
+    // closeDb() reject.
+    await poolBeforeFailedClose.end();
+
+    await expect(client.closeDb()).rejects.toBeInstanceOf(DbCloseError);
+
+    // A failed closeDb() must leave the cached pool untouched, so the next
+    // getPool()/getDb() keeps returning the (broken) pool the caller
+    // already knows about, rather than lazily creating a fresh one behind
+    // their back.
+    expect(client.getPool()).toBe(poolBeforeFailedClose);
+  });
+
+  it('retries pool.end() and throws a fresh DbCloseError on a sequential closeDb() call after an earlier attempt already failed', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    await pool.end();
+
+    let firstError: unknown;
+    try {
+      await client.closeDb();
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toBeInstanceOf(DbCloseError);
+
+    // The first attempt already fully settled (this is not an overlap), so
+    // a second, later closeDb() call must retry pool.end() for itself
+    // rather than replaying the first attempt's outcome -- "fail loud every
+    // time", not a silent success or a memoised failure.
+    let secondError: unknown;
+    try {
+      await client.closeDb();
+    } catch (error) {
+      secondError = error;
+    }
+    expect(secondError).toBeInstanceOf(DbCloseError);
+    expect(secondError).not.toBe(firstError);
+    expect((secondError as DbCloseError).cause).not.toBe(
+      (firstError as DbCloseError).cause
+    );
+  });
+
+  it('resolves both calls when closeDb() is invoked twice concurrently without awaiting the first (e.g. SIGTERM + SIGINT racing)', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    client.getPool();
+
+    // Deliberately do not await the first call before starting the second:
+    // this is the exact overlap a SIGTERM handler and a SIGINT handler
+    // racing each other would produce. pg-pool's real Pool.end() sets
+    // `this.ending = true` synchronously, before its own await point, so a
+    // second overlapping closeDb() call must not perform a second real
+    // pool.end() and must not see a spurious "Called end on pool more than
+    // once" rejection just because the first call's pool.end() promise
+    // hasn't settled yet.
+    const first = client.closeDb();
+    const second = client.closeDb();
+
+    await expect(first).resolves.toBeUndefined();
+    await expect(second).resolves.toBeUndefined();
+  });
+
+  it('builds a fresh pool after two overlapping closeDb() calls both settle', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const before = client.getPool();
+
+    const first = client.closeDb();
+    const second = client.closeDb();
+    await Promise.all([first, second]);
+
+    // Dedup of the in-flight close must not break the normal post-close
+    // rebuild: once both overlapping calls have settled, a fresh pool is
+    // still built lazily on next use, same as a single closeDb() call.
+    expect(client.getPool()).not.toBe(before);
+    await client.closeDb();
+  });
+
+  it('rejects both overlapping closeDb() calls with the same DbCloseError when the underlying pool.end() fails', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    // Same double-end setup as the single-call failure tests above: end the
+    // pool directly so the pool.end() call closeDb() makes internally hits
+    // an already-ended pg Pool and rejects.
+    await pool.end();
+
+    const [firstOutcome, secondOutcome] = await Promise.allSettled([
+      client.closeDb(),
+      client.closeDb()
+    ]);
+
+    expect(firstOutcome.status).toBe('rejected');
+    expect(secondOutcome.status).toBe('rejected');
+    const firstError = (firstOutcome as PromiseRejectedResult).reason;
+    const secondError = (secondOutcome as PromiseRejectedResult).reason;
+
+    expect(firstError).toBeInstanceOf(DbCloseError);
+    expect(secondError).toBeInstanceOf(DbCloseError);
+    // Both overlapping calls must share the outcome of the single in-flight
+    // pool.end() attempt, not each trigger their own separate pool.end()
+    // call (which would produce unrelated/independent errors instead of the
+    // same underlying cause).
+    expect(secondError).toBe(firstError);
+    expect((secondError as DbCloseError).cause).toBe(
+      (firstError as DbCloseError).cause
+    );
   });
 });
 
