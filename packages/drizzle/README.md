@@ -101,14 +101,25 @@ while it is checked out). `createDb` attaches a listener for both cases —
 | `closeDb()` | Ends the pool; the next query builds a fresh one          |
 
 On success, `closeDb()` ends the pool and the next `getDb()`/`getPool()`
-builds a fresh one, as above. If the underlying `pool.end()` rejects (e.g. a
-shutdown while a client is still checked out), `closeDb()` rejects with a
+builds a fresh one, as above. If the underlying `pool.end()` rejects —
+in practice this happens when `end()` is called on a pool that is already
+ending or has already ended (`pg`/`pg-pool`'s own "Called end on pool more
+than once"), for example a `closeDb()` retry after an earlier attempt on
+this same pool already failed (a successful attempt clears the cached pool,
+so there is nothing left to retry against), or something else having called
+`pool.end()`/`getPool().end()` directly — `closeDb()` rejects with a
 `DbCloseError` (the original `pg`/`pg-pool` error as `cause`) instead of
 leaking that raw error, and deliberately leaves the pool in place: a `pg`
 pool can never serve a new connection again once `end()` has been called on
 it, so `getDb()`/`getPool()` keep returning that same (no longer usable)
 pool rather than silently opening a second one against the same database.
 Recovering needs a process restart.
+
+Two `closeDb()` calls that overlap while the first is still running (e.g. a
+`SIGTERM` and a `SIGINT` handler both calling `closeDb()` without awaiting
+one before the other) share the one real `pool.end()` call and its outcome,
+rather than the second one calling `pool.end()` again on the same pool and
+getting a spurious rejection purely from the overlap.
 
 The pool lives on `globalThis`, keyed by `cacheKey`. Next.js dev reloads the
 module on every change; without this each reload opens another pool until

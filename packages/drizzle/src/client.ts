@@ -35,6 +35,13 @@ export interface DbClient<TSchema extends Schema> {
 interface Cache<TSchema extends Schema> {
   pool?: Pool;
   db?: Db<TSchema>;
+  // The in-flight closeDb() attempt, if one is currently running. Lets a
+  // second, overlapping closeDb() call (e.g. a SIGTERM and a SIGINT handler
+  // both calling closeDb() without awaiting one before the other) share the
+  // outcome of the one real pool.end() call already in progress, instead of
+  // calling pool.end() a second time on the same pool and getting a
+  // spurious rejection purely because of the race.
+  closing?: Promise<void>;
 }
 
 const DEFAULT_POOL_MAX = 10;
@@ -54,9 +61,17 @@ function poolMax(): number {
   return Number.isInteger(max) && max > 0 ? max : DEFAULT_POOL_MAX;
 }
 
-// Thrown by closeDb() when the underlying pool.end() rejects (e.g. a
-// shutdown while a client is still checked out), instead of letting the raw
-// pg/pg-pool error reach the caller ungoverned by any wrapper type.
+// Thrown by closeDb() when the underlying pool.end() rejects, instead of
+// letting the raw pg/pg-pool error reach the caller ungoverned by any
+// wrapper type. In practice this happens when pool.end() is called on a
+// pool that is already ending or has already ended -- pg-pool's own
+// "Called end on pool more than once" -- for example a closeDb() retry
+// after an earlier attempt on this same pool already failed (a successful
+// attempt clears cache.pool, so there is nothing left to retry against), or
+// something else having called pool.end()/getPool().end() directly. Two
+// closeDb() calls that overlap *while the first is still in flight* do not
+// hit this: see the `cache.closing` dedup below, which makes them share the
+// single underlying pool.end() call instead of each issuing their own.
 export class DbCloseError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -144,25 +159,40 @@ export function createDb<TSchema extends Schema>(
   async function closeDb(): Promise<void> {
     const pool = cache.pool;
     if (!pool) return;
-    try {
-      await pool.end();
-    } catch (error: unknown) {
-      // Deliberately leave cache.pool/cache.db untouched: pg-pool marks the
-      // pool as ending the moment end() is called, so this pool can never
-      // serve a new connection again regardless of whether end() itself
-      // resolves or rejects. Keeping the reference means the next
-      // getDb()/getPool() call returns this same (broken) pool instead of
-      // silently opening a second one against the same database next to a
-      // half-closed first. Every later query or closeDb() retry then fails
-      // loudly against pg's own errors (e.g. "Cannot use a pool after
-      // calling end on the pool" / "Called end on pool more than once"),
-      // never silently.
-      throw new DbCloseError('Closing the database pool failed', {
-        cause: error
-      });
-    }
-    cache.pool = undefined;
-    cache.db = undefined;
+    // A closeDb() call already in flight owns the one real pool.end() call;
+    // share its outcome instead of calling pool.end() again on the same
+    // pool, which would otherwise reject with pg-pool's own "Called end on
+    // pool more than once" purely because of the overlap, not because of an
+    // actual close failure.
+    cache.closing ??= (async () => {
+      try {
+        await pool.end();
+      } catch (error: unknown) {
+        // Deliberately leave cache.pool/cache.db untouched: pg-pool marks
+        // the pool as ending the moment end() is called, so this pool can
+        // never serve a new connection again regardless of whether end()
+        // itself resolves or rejects. Keeping the reference means the next
+        // getDb()/getPool() call returns this same (broken) pool instead of
+        // silently opening a second one against the same database next to a
+        // half-closed first. Every later query or closeDb() retry then
+        // fails loudly against pg's own errors (e.g. "Cannot use a pool
+        // after calling end on the pool" / "Called end on pool more than
+        // once"), never silently.
+        throw new DbCloseError('Closing the database pool failed', {
+          cause: error
+        });
+      } finally {
+        // Clear the in-flight marker once this attempt has settled (either
+        // way), so the next closeDb() call -- a sequential retry after a
+        // failure, or a fresh close after a later getPool() rebuilt the
+        // pool -- starts its own attempt instead of replaying this one.
+        cache.closing = undefined;
+      }
+      cache.pool = undefined;
+      cache.db = undefined;
+    })();
+
+    return cache.closing;
   }
 
   return { db, getDb, getPool, closeDb };
