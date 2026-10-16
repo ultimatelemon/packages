@@ -87,9 +87,13 @@ export interface AuthErrorInfo {
 }
 
 /**
- * Safe to log or render: unlike `error.cause`, this never carries the raw
- * identity-provider response. Returns `null` for anything that is not an
- * `AuthError`.
+ * Safe to log or render: a flat `{ name, code, message }` summary of an
+ * `AuthError`, with no `cause` field. `error.cause` on an `AuthError` is
+ * itself already filtered down to `{ name, code? }` by `describeCause()` (see
+ * below), so logging it directly is also safe — this function remains the
+ * recommended way to get a summary that also covers codes with no `cause` at
+ * all (`flow_expired`, `no_email`). Returns `null` for anything that is not
+ * an `AuthError`.
  */
 export function describeAuthError(error: unknown): AuthErrorInfo | null {
   if (!(error instanceof AuthError)) return null;

@@ -429,6 +429,34 @@ describe('createAuth - finishLogin cause filtering and success path', () => {
     assertNoLeak(error, sensitive);
   });
 
+  // A rejection value that is not an `Error` instance at all (a plain object,
+  // as some OAuth libraries reject with the parsed error-response body
+  // directly) is the most leak-prone shape: there is no `.name`/`.code` to
+  // fall back to, only `typeof`. This exercises the `describeCause()` branch
+  // the other tests in this block never reach, since they all reject with a
+  // real `Error`.
+  it('falls back to `{ name: typeof error }` for a non-Error rejection, never spreading its properties into the cause', async () => {
+    const instance = freshAuth();
+    const sensitive = 'secret-access-token-value';
+    const upstream = {
+      error: 'invalid_grant',
+      access_token: sensitive
+    };
+    vi.mocked(client.authorizationCodeGrant).mockRejectedValueOnce(upstream);
+
+    const error = (await instance
+      .finishLogin(
+        'https://app.example/api/auth/callback?code=x',
+        validFlowCookie()
+      )
+      .catch((e: unknown) => e)) as AuthError;
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.code).toBe('exchange_failed');
+    expect(error.cause).toEqual({ name: 'object' });
+    assertNoLeak(error, sensitive);
+  });
+
   it('filters a tokens.claims() failure cause down to name and code (no_identity), never leaking the upstream error message into the thrown AuthError', async () => {
     const instance = freshAuth();
     const sensitive = 'id token said: Bearer abc123-super-secret';
@@ -525,7 +553,20 @@ describe('createAuth - finishLogin cause filtering and success path', () => {
       authTime
     });
     expect(result.returnTo).toBe('/');
+    // AC7: the success path must leave session, token and profile unchanged
+    // end-to-end. A bare `toHaveLength(2)` only proves two cookies exist, not
+    // that the right cookie carries the right (still-valid) JWT, so assert
+    // the cookie names explicitly and round-trip-decode the session cookie's
+    // actual token value back through the instance's own readSession(),
+    // rather than trusting the in-memory `result.session` object alone.
     expect(result.cookies).toHaveLength(2);
+    expect(result.cookies[0].name).toBe(instance.flowCookieName());
+    expect(result.cookies[0].value).toBe('');
+    expect(result.cookies[0].options.maxAge).toBe(0);
+    expect(result.cookies[1].name).toBe(instance.sessionCookieName());
+    await expect(
+      instance.readSession(result.cookies[1].value)
+    ).resolves.toEqual(result.session);
   });
 });
 
