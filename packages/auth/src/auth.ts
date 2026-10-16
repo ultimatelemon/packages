@@ -268,6 +268,16 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
     // malformed `requestUrl`) must propagate unwrapped, not get mislabeled
     // as `exchange_failed`. Only `client.authorizationCodeGrant()` itself is
     // allowed to produce `exchange_failed`.
+    //
+    // Keep this line AFTER `await configuration()`, not before: a malformed
+    // `requestUrl` makes this line throw on its own (via `new URL()`), and
+    // if that happened before discovery had a chance to run, a discovery
+    // failure that would also occur on this call would never get reported as
+    // `discovery_failed` -- the raw `TypeError` from here would win instead
+    // just because it runs first. Placing it after
+    // `configuration()` guarantees discovery_failed keeps priority, exactly
+    // like it already does ahead of `exchange_failed`. See the "ordering
+    // regression" test in auth.test.ts.
     const redirectUri = callbackUrlFor(requestUrl);
 
     let tokens: client.TokenEndpointResponse &

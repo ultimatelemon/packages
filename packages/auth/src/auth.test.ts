@@ -356,6 +356,32 @@ describe('createAuth - exchange_failed scope', () => {
       cause: underlying
     });
   });
+
+  it('still reports discovery_failed, not a raw error, when discovery fails and the redirect URI would also fail to build (ordering regression: redirectUri must be computed after configuration(), not before)', async () => {
+    // Both `configuration()` and the hoisted `callbackUrlFor(requestUrl)`
+    // line can throw on their own (discovery() rejecting; `new URL()` on a
+    // malformed requestUrl, respectively). If the redirectUri line were ever
+    // moved before `await configuration()`, this malformed requestUrl would
+    // throw first and discovery_failed would never surface -- this test
+    // fails loudly if that reordering happens.
+    const instance = freshAuth();
+    const discoveryMock = vi.mocked(client.discovery);
+    const callsBefore = discoveryMock.mock.calls.length;
+    discoveryMock.mockRejectedValueOnce(new Error('network down'));
+
+    const promise = instance.finishLogin('not a valid url', validFlowCookie);
+
+    await expect(promise).rejects.toBeInstanceOf(AuthError);
+    await expect(promise).rejects.toMatchObject({ code: 'discovery_failed' });
+
+    // Proves `client.discovery()` was actually reached (and the queued
+    // rejection above consumed) rather than this test passing vacuously
+    // because `callbackUrlFor()` threw first and `client.discovery()` was
+    // never called -- which is exactly the regression this test guards
+    // against. A leaked `mockRejectedValueOnce` would otherwise silently
+    // fail an unrelated, later test instead of this one.
+    expect(discoveryMock.mock.calls.length).toBe(callsBefore + 1);
+  });
 });
 
 // The insecure-http gate must be default-deny: a plain-http issuer is only

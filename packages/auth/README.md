@@ -88,9 +88,17 @@ discovery failure: `discovery_failed`. `finishLogin` additionally throws
 instead of a stack trace.
 
 A throw from your own `options` config function (e.g. a lazily-read missing
-env var), or a malformed `request.url`, is never wrapped as an `AuthError` —
-it propagates as-is, the same way in `startLogin`, `finishLogin` and anywhere
-else `createAuth` reads your config or the request.
+env var) during `startLogin` or `finishLogin` is never wrapped as an
+`AuthError` — it propagates as-is. `finishLogin` can likewise propagate a raw
+`TypeError` from a malformed `request.url`; `startLogin` never reads the
+request, so that case doesn't apply there.
+
+`readSession` only swallows problems with the _session itself_ — a
+missing/malformed/expired/forged token, or a `sessionSecret` shorter than 32
+characters — resolving to `null` the same as a missing cookie. It does not
+swallow a throw from your own `options` config function: `readSession` reads
+your config synchronously before it ever looks at the token, so that throw
+escapes immediately, not even as a rejected promise.
 
 The original error from the identity provider is in `cause` — for
 `exchange_failed` and `profile_unreachable` that can be a token-endpoint
