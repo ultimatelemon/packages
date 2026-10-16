@@ -100,6 +100,16 @@ while it is checked out). `createDb` attaches a listener for both cases —
 | `getPool()` | The `pg` pool, for `LISTEN`, raw queries or health checks |
 | `closeDb()` | Ends the pool; the next query builds a fresh one          |
 
+On success, `closeDb()` ends the pool and the next `getDb()`/`getPool()`
+builds a fresh one, as above. If the underlying `pool.end()` rejects (e.g. a
+shutdown while a client is still checked out), `closeDb()` rejects with a
+`DbCloseError` (the original `pg`/`pg-pool` error as `cause`) instead of
+leaking that raw error, and deliberately leaves the pool in place: a `pg`
+pool can never serve a new connection again once `end()` has been called on
+it, so `getDb()`/`getPool()` keep returning that same (no longer usable)
+pool rather than silently opening a second one against the same database.
+Recovering needs a process restart.
+
 The pool lives on `globalThis`, keyed by `cacheKey`. Next.js dev reloads the
 module on every change; without this each reload opens another pool until
 Postgres refuses connections.
@@ -134,6 +144,15 @@ Drizzle wraps the `pg` error in `cause`; these walk that chain. Only a
 five-character SQLSTATE counts, so a connection error (`ECONNREFUSED`) is not
 mistaken for one. Pass the constraint name when a table has more than one
 unique index and the message depends on which one fired.
+
+`DbCloseError`, thrown by `closeDb()` (see above), carries the original
+`pg`/`pg-pool` error as `cause`. `getPgError`/`isPgError` walk that same
+`cause` chain, so they keep working unchanged through a `DbCloseError`
+wrapper — though a pool shutdown failure is typically a plain `pg-pool`
+error without a SQLSTATE `code`, so those helpers will usually return
+`null`/`false` for it, same as for any other non-database error. Check
+`error instanceof DbCloseError` to tell a failed shutdown apart from a query
+error.
 
 ## Migrations
 

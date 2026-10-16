@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDb } from './client.js';
+import { createDb, DbCloseError } from './client.js';
 import { isUniqueViolation } from './errors.js';
 
 const schema = {};
@@ -152,6 +152,59 @@ describe('createDb', () => {
     await client.closeDb();
     expect(client.getPool()).not.toBe(before);
     await client.closeDb();
+  });
+
+  it('rejects with a DbCloseError carrying the underlying pg-pool failure as `cause` when pool.end() fails', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    // End the pool directly, outside of closeDb(), so the pool.end() call
+    // closeDb() makes internally hits an already-ended pg Pool. pg-pool
+    // rejects a second end() (e.g. "Called end on pool more than once"),
+    // which is the real-world case closeDb() must surface, not swallow.
+    await pool.end();
+
+    let caught: unknown;
+    try {
+      await client.closeDb();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DbCloseError);
+    const dbCloseError = caught as DbCloseError;
+    // The original pg-pool error must be reachable via `cause`, not
+    // discarded, and must not just be the DbCloseError pointing at itself.
+    // pg-pool's own message for ending an already-ended pool confirms this
+    // is the real underlying failure, not some unrelated stand-in error.
+    expect(dbCloseError.cause).toBeInstanceOf(Error);
+    expect(dbCloseError.cause).not.toBe(dbCloseError);
+    expect((dbCloseError.cause as Error).message).toMatch(
+      /Called end on pool more than once/
+    );
+  });
+
+  it('keeps serving the same pool from getPool() after a failed closeDb(), instead of silently opening a second one', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const poolBeforeFailedClose = client.getPool();
+    // Same double-end setup as above: makes the internal pool.end() inside
+    // closeDb() reject.
+    await poolBeforeFailedClose.end();
+
+    await expect(client.closeDb()).rejects.toBeInstanceOf(DbCloseError);
+
+    // A failed closeDb() must leave the cached pool untouched, so the next
+    // getPool()/getDb() keeps returning the (broken) pool the caller
+    // already knows about, rather than lazily creating a fresh one behind
+    // their back.
+    expect(client.getPool()).toBe(poolBeforeFailedClose);
   });
 });
 

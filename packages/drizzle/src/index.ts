@@ -1,4 +1,4 @@
-export { createDb } from './client.js';
+export { createDb, DbCloseError } from './client.js';
 export type { CreateDbOptions, Db, DbClient, DbOrTx, Tx } from './client.js';
 export {
   PgErrorCode,

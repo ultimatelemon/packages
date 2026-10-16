@@ -54,6 +54,16 @@ function poolMax(): number {
   return Number.isInteger(max) && max > 0 ? max : DEFAULT_POOL_MAX;
 }
 
+// Thrown by closeDb() when the underlying pool.end() rejects (e.g. a
+// shutdown while a client is still checked out), instead of letting the raw
+// pg/pg-pool error reach the caller ungoverned by any wrapper type.
+export class DbCloseError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'DbCloseError';
+  }
+}
+
 export function createDb<TSchema extends Schema>(
   options: CreateDbOptions<TSchema>
 ): DbClient<TSchema> {
@@ -133,11 +143,26 @@ export function createDb<TSchema extends Schema>(
 
   async function closeDb(): Promise<void> {
     const pool = cache.pool;
+    if (!pool) return;
+    try {
+      await pool.end();
+    } catch (error: unknown) {
+      // Deliberately leave cache.pool/cache.db untouched: pg-pool marks the
+      // pool as ending the moment end() is called, so this pool can never
+      // serve a new connection again regardless of whether end() itself
+      // resolves or rejects. Keeping the reference means the next
+      // getDb()/getPool() call returns this same (broken) pool instead of
+      // silently opening a second one against the same database next to a
+      // half-closed first. Every later query or closeDb() retry then fails
+      // loudly against pg's own errors (e.g. "Cannot use a pool after
+      // calling end on the pool" / "Called end on pool more than once"),
+      // never silently.
+      throw new DbCloseError('Closing the database pool failed', {
+        cause: error
+      });
+    }
     cache.pool = undefined;
     cache.db = undefined;
-    if (pool) {
-      await pool.end();
-    }
   }
 
   return { db, getDb, getPool, closeDb };
