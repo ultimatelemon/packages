@@ -153,4 +153,5 @@ appUrl)` would drop `/account` from `https://id.example/account`.
   flag. Without the opt-in, discovery itself fails against a plain-http
   issuer, surfacing as `AuthError('discovery_failed')` like any other
   discovery failure.
-- **Discovery** is cached per process, and retried after a failure.
+- **Discovery** is cached per `createAuth()` instance, and retried after a
+  failure.

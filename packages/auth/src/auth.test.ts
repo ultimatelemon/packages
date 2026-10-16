@@ -264,6 +264,55 @@ describe('createAuth - discovery failure handling', () => {
     expect(typeof result.url).toBe('string');
     expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
   });
+
+  // PKG-13 changes configuration()'s catch handler so it only clears
+  // `discovered` when `discovered === attempt` still holds, i.e. only when no
+  // newer attempt has since replaced the one that just failed (instead of
+  // unconditionally nulling it out). A literal overlapping race through the
+  // public API (startLogin/finishLogin) cannot be constructed today, though:
+  // configuration() is a plain synchronous function that assigns `discovered`
+  // before it ever returns a promise, and both startLogin() and finishLogin()
+  // call it before their first `await` (finishLogin() does a synchronous
+  // parseFlow() check first, but nothing in between can yield control).
+  // Calling either of them twice back-to-back therefore can never produce two
+  // *different* `attempt` promises in flight for the same instance — the
+  // second call's synchronous prelude always observes the first call's
+  // already-assigned `discovered` and reuses that exact same promise. There
+  // is no `await` anywhere between the `!discovered` check and the
+  // `discovered = ...` assignment, so nothing can interleave there. This test
+  // therefore does not attempt a same-instance race (it would be a no-op race
+  // that can't fail either way); instead it verifies, through the public API,
+  // the one property the identity check actually protects in practice: that
+  // the `discovered` cache a failed attempt clears is scoped to its own
+  // createAuth() closure and never leaks into or clobbers another instance's
+  // cache. "A single failed attempt must still clear its own cache" is
+  // already covered end-to-end by the test above; this test adds "...and
+  // never anyone else's".
+  it('keeps discovery caches independent across separate createAuth() instances, so a failure on one instance never disturbs another instance that already cached (or is using) its own configuration', async () => {
+    const discoveryMock = vi.mocked(client.discovery);
+    const instanceA = freshAuth();
+    const instanceB = freshAuth();
+
+    // instanceB succeeds first and caches its own configuration.
+    await instanceB.startLogin('/x');
+    const callsAfterBSucceeds = discoveryMock.mock.calls.length;
+
+    // instanceA's discovery now fails.
+    discoveryMock.mockRejectedValueOnce(new Error('network down'));
+    await expect(instanceA.startLogin('/x')).rejects.toBeInstanceOf(AuthError);
+
+    // instanceB must be completely unaffected: its own cached configuration
+    // is still used, so this call does not trigger a new discovery request.
+    await instanceB.startLogin('/x');
+    expect(discoveryMock.mock.calls.length).toBe(callsAfterBSucceeds + 1);
+
+    // instanceA, meanwhile, must still be able to retry and succeed, proving
+    // its own cache (and only its own) was the one cleared by its own
+    // failed attempt.
+    const resultA = await instanceA.startLogin('/x');
+    expect(typeof resultA.url).toBe('string');
+    expect(discoveryMock.mock.calls.length).toBe(callsAfterBSucceeds + 2);
+  });
 });
 
 // The insecure-http gate must be default-deny: a plain-http issuer is only

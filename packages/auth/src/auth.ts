@@ -163,7 +163,7 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
         issuer.protocol === 'http:' &&
         s.allowInsecureHttp === true &&
         process.env.NODE_ENV !== 'production';
-      discovered = client
+      const attempt: Promise<client.Configuration> = client
         .discovery(
           issuer,
           s.clientId,
@@ -172,9 +172,17 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
           insecure ? { execute: [client.allowInsecureRequests] } : undefined
         )
         .catch((error: unknown) => {
-          discovered = null;
+          // Only clear the cache if this attempt is still the current one.
+          // A newer attempt may have already replaced `discovered` by the
+          // time this rejection is processed (microtask timing), and a
+          // stale rejection must not clobber that newer entry — the same
+          // identity-check pattern as the INF-81 fix in accounts' oidc.ts.
+          if (discovered === attempt) {
+            discovered = null;
+          }
           throw new AuthError('discovery_failed', { cause: error });
         });
+      discovered = attempt;
     }
     return discovered;
   }
