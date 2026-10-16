@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 import { sql } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createDb } from './client.js';
 import { isUniqueViolation } from './errors.js';
@@ -26,6 +26,16 @@ describe('createDb', () => {
     else process.env.DATABASE_URL = original;
   });
 
+  // DATABASE_POOL_MAX is only ever set from within a test body below; clean
+  // it up here (not inline in each test) so a failing assertion never leaks
+  // it into a later test. Restoring mocks here too means a `console.warn`
+  // spy survives a failed assertion in the same test without leaking into
+  // the next one (an inline `mockRestore()` after the assertions would not).
+  afterEach(() => {
+    delete process.env.DATABASE_POOL_MAX;
+    vi.restoreAllMocks();
+  });
+
   it('reads no env and opens no pool until the first use', () => {
     const client = createDb({ schema, cacheKey: nextKey() });
     expect(() => client.getPool()).toThrow('DATABASE_URL is missing');
@@ -43,6 +53,7 @@ describe('createDb', () => {
 
   it('applies the pool defaults and lets options override them', async () => {
     process.env.DATABASE_POOL_MAX = '3';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const client = createDb({
       schema,
       cacheKey: nextKey(),
@@ -62,9 +73,92 @@ describe('createDb', () => {
     expect(pool.options.statement_timeout).toBe(20000);
     expect(pool.options.lock_timeout).toBe(500);
     expect(pool.options.idle_in_transaction_session_timeout).toBe(20000);
-    delete process.env.DATABASE_POOL_MAX;
+    // A DATABASE_POOL_MAX value that is already within the upper bound must
+    // not trigger the "value was capped" warning.
+    expect(warnSpy).not.toHaveBeenCalled();
     await client.closeDb();
   });
+
+  it('lets the explicit pool.max option bypass the DATABASE_POOL_MAX cap', async () => {
+    process.env.DATABASE_POOL_MAX = '10000';
+    // poolMax() still runs (and so still warns) even though the explicit
+    // `pool.max` below overrides its result; silence that expected warning,
+    // it is not what this test is about.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app',
+      pool: { max: 50 }
+    });
+    const pool = client.getPool();
+    // The explicit `pool` option is spread after `max: poolMax()`, so it
+    // always wins -- the cap only guards against a bare env-var typo, not a
+    // deliberate, code-reviewed override.
+    expect(pool.options.max).toBe(50);
+    await client.closeDb();
+  });
+
+  it('caps DATABASE_POOL_MAX at the hard upper bound of 20', async () => {
+    process.env.DATABASE_POOL_MAX = '10000';
+    // Silence the expected warning; it is asserted on separately below.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    expect(pool.options.max).toBe(20);
+    await client.closeDb();
+  });
+
+  it('warns exactly once, naming both the requested and the applied value, when DATABASE_POOL_MAX exceeds the upper bound', async () => {
+    process.env.DATABASE_POOL_MAX = '10000';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    client.getPool();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // The message wording is an implementation detail; only the two numbers
+    // (requested and applied) are part of the contract. Match on word
+    // boundaries so e.g. a requested value of "2000" could not satisfy the
+    // assertion for the applied value "20" by mere substring overlap.
+    const message = warnSpy.mock.calls[0]?.join(' ') ?? '';
+    expect(message).toMatch(/\b10000\b/);
+    expect(message).toMatch(/\b20\b/);
+    await client.closeDb();
+  });
+
+  it.each([
+    ['missing/undefined', undefined],
+    ['empty string', ''],
+    ['non-numeric', 'abc'],
+    ['zero', '0'],
+    ['negative', '-1']
+  ])(
+    'stays silent and falls back to the default pool max 10 when DATABASE_POOL_MAX is %s',
+    async (_label, value) => {
+      if (value === undefined) {
+        delete process.env.DATABASE_POOL_MAX;
+      } else {
+        process.env.DATABASE_POOL_MAX = value;
+      }
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const client = createDb({
+        schema,
+        cacheKey: nextKey(),
+        connectionString: 'postgresql://localhost/app'
+      });
+      const pool = client.getPool();
+      expect(pool.options.max).toBe(10);
+      expect(warnSpy).not.toHaveBeenCalled();
+      await client.closeDb();
+    }
+  );
 
   it('defaults statement_timeout, lock_timeout and idle_in_transaction_session_timeout when not overridden', async () => {
     const client = createDb({

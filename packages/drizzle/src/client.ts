@@ -38,6 +38,15 @@ interface Cache<TSchema extends Schema> {
 }
 
 const DEFAULT_POOL_MAX = 10;
+// DATABASE_POOL_MAX is an env var, so a typo (10000 instead of 100) is one
+// keystroke away and would otherwise be handed straight to pg. Postgres runs
+// on its default max_connections=100 in most of our setups -- including the
+// CI postgres service, see shared-actions/.github/workflows/node-quality.yml --
+// and part of that budget is already reserved for superuser/maintenance
+// connections. With several instances of the same app alive at once during a
+// rolling deploy, 20 connections per instance is still plenty of headroom for
+// any app we run, while keeping a single typo from starving the server.
+const MAX_POOL_MAX = 20;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 5000;
 // lock_timeout must stay strictly smaller than statement_timeout: otherwise
 // statement_timeout (57014 query_canceled) cancels a lock wait before
@@ -51,7 +60,18 @@ const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 10_000;
 
 function poolMax(): number {
   const max = Number(process.env.DATABASE_POOL_MAX);
-  return Number.isInteger(max) && max > 0 ? max : DEFAULT_POOL_MAX;
+  if (!Number.isInteger(max) || max <= 0) {
+    return DEFAULT_POOL_MAX;
+  }
+  if (max > MAX_POOL_MAX) {
+    // Warn rather than throw: the pool is built lazily on the first query, so
+    // a throw here would surface at an arbitrary request instead of at boot.
+    console.warn(
+      `DATABASE_POOL_MAX=${max} exceeds the maximum of ${MAX_POOL_MAX}; using ${MAX_POOL_MAX}.`
+    );
+    return MAX_POOL_MAX;
+  }
+  return max;
 }
 
 export function createDb<TSchema extends Schema>(
