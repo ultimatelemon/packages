@@ -84,14 +84,18 @@ const session = await auth.readSession(
 `startLogin` and `finishLogin` throw an `AuthError` with a `code` on a
 discovery failure: `discovery_failed`. `finishLogin` additionally throws
 `flow_expired`, `exchange_failed`, `no_identity`, `profile_unreachable` or
-`no_email`. Catch it in the login route and the callback and show a page
-instead of a stack trace.
+`no_email`. `no_identity` covers both a token response with no usable `sub`
+and a token whose claims could not be read at all. Catch it in the login route
+and the callback and show a page instead of a stack trace.
 
-The original error from the identity provider is in `cause` — for
-`exchange_failed` and `profile_unreachable` that can be a token-endpoint
-response or userinfo claims (email, sub). Don't log or render `cause` (or the
-whole `AuthError`, which carries it) as-is. Use `describeAuthError()` for a
-safe summary instead:
+`cause` is already safe to log: for every code that can come from an upstream
+call (`discovery_failed`, `exchange_failed`, `no_identity`,
+`profile_unreachable`), it is a filtered `{ name, code? }` summary of whatever
+failed, never the raw identity-provider response, claims or token material.
+There is nothing to redact before logging `error.cause` or the whole
+`AuthError`. `describeAuthError()` remains the recommended way to get a flat
+summary, since it also covers `flow_expired` and `no_email` without needing to
+know which codes carry a `cause`:
 
 ```ts
 import { describeAuthError } from '@ultimatelemon-eu/auth';
@@ -108,9 +112,6 @@ try {
 | Function                   | Returns                                                        |
 | -------------------------- | -------------------------------------------------------------- |
 | `describeAuthError(error)` | `{ name, code, message }` for an `AuthError`, `null` otherwise |
-
-If a consumer needs the raw provider error (e.g. for a support ticket), read
-`error.cause` directly and redact it first.
 
 `readSession` checks signature, expiry, issuer and audience, and returns
 `null` on any doubt. It uses `jose` only, so a `proxy.ts` can call it.
