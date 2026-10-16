@@ -15,7 +15,11 @@ vi.mock('openid-client', async (importOriginal) => {
           'id',
           'secret'
         )
-    )
+    ),
+    // No default implementation: every test below that reaches this call
+    // sets its own resolved/rejected value via
+    // vi.mocked(client.authorizationCodeGrant).
+    authorizationCodeGrant: vi.fn()
   };
 });
 
@@ -263,6 +267,94 @@ describe('createAuth - discovery failure handling', () => {
     const result = await instance.startLogin('/x');
     expect(typeof result.url).toBe('string');
     expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
+  });
+});
+
+// `finishLogin()` must not mislabel every failure between `await
+// configuration()` and the actual token exchange as `exchange_failed`. Only a
+// genuine failure of `client.authorizationCodeGrant(...)` itself may produce
+// that code; anything thrown by the consumer-supplied config function (the
+// `resolve()` callback passed to `createAuth`) while building the redirect
+// URI must propagate unwrapped, since callers rely on being able to tell
+// their own configuration bugs apart from a failed code exchange.
+describe('createAuth - exchange_failed scope', () => {
+  function freshAuth() {
+    return createAuth(() => ({
+      issuer: 'https://id.example',
+      clientId: 'id',
+      clientSecret: 'secret',
+      appUrl: 'https://app.example',
+      sessionSecret: 'x'.repeat(32),
+      cookiePrefix: 'cellar'
+    }));
+  }
+
+  const validFlowCookie = JSON.stringify({
+    state: 's',
+    nonce: 'n',
+    verifier: 'v',
+    returnTo: '/'
+  });
+
+  it('propagates a throw from the consumer resolve() config function during finishLogin() as-is, not as AuthError exchange_failed', async () => {
+    // The resolve() callback only throws once discovery has already
+    // succeeded and been cached, so finishLogin()'s `await configuration()`
+    // resolves from cache without calling resolve() again, and the only
+    // remaining caller of resolve() is callbackUrlFor() -> callbackUrl() ->
+    // settings(). That call must not get relabelled as exchange_failed.
+    let shouldThrow = false;
+    const thrownError = new Error('consumer config exploded');
+    const instance = createAuth(() => {
+      if (shouldThrow) throw thrownError;
+      return {
+        issuer: 'https://id.example',
+        clientId: 'id',
+        clientSecret: 'secret',
+        appUrl: 'https://app.example',
+        sessionSecret: 'x'.repeat(32),
+        cookiePrefix: 'cellar'
+      };
+    });
+
+    // Warm the discovery cache while resolve() still returns valid config.
+    await instance.startLogin('/x');
+
+    // Now make the consumer config function start throwing, and exercise
+    // finishLogin() with a flow cookie that is valid enough to get past
+    // parseFlow() and reach `await configuration()` (cached, so it
+    // succeeds) and then callbackUrlFor(requestUrl).
+    shouldThrow = true;
+    // Cleared so the "never called" assertion below cannot pass merely
+    // because an earlier test in this file happened not to reach this mock.
+    vi.mocked(client.authorizationCodeGrant).mockClear();
+    const promise = instance.finishLogin(
+      'https://app.example/api/auth/callback?code=x',
+      validFlowCookie
+    );
+
+    await expect(promise).rejects.toBe(thrownError);
+    await expect(promise).rejects.not.toBeInstanceOf(AuthError);
+
+    // The resolve() throw must happen before the token exchange is ever
+    // attempted, further proving this isn't a mislabeled exchange failure.
+    expect(client.authorizationCodeGrant).not.toHaveBeenCalled();
+  });
+
+  it('still wraps a genuine client.authorizationCodeGrant() failure as AuthError exchange_failed with the original error as cause', async () => {
+    const instance = freshAuth();
+    const underlying = new Error('token endpoint rejected the code');
+    vi.mocked(client.authorizationCodeGrant).mockRejectedValueOnce(underlying);
+
+    const promise = instance.finishLogin(
+      'https://app.example/api/auth/callback?code=x',
+      validFlowCookie
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(AuthError);
+    await expect(promise).rejects.toMatchObject({
+      code: 'exchange_failed',
+      cause: underlying
+    });
   });
 });
 

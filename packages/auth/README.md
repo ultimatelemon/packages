@@ -87,6 +87,11 @@ discovery failure: `discovery_failed`. `finishLogin` additionally throws
 `no_email`. Catch it in the login route and the callback and show a page
 instead of a stack trace.
 
+A throw from your own `options` config function (e.g. a lazily-read missing
+env var), or a malformed `request.url`, is never wrapped as an `AuthError` —
+it propagates as-is, the same way in `startLogin`, `finishLogin` and anywhere
+else `createAuth` reads your config or the request.
+
 The original error from the identity provider is in `cause` — for
 `exchange_failed` and `profile_unreachable` that can be a token-endpoint
 response or userinfo claims (email, sub). Don't log or render `cause` (or the

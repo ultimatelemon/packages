@@ -261,20 +261,24 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
     if (!flow) throw new AuthError('flow_expired');
 
     const config = await configuration();
+    // Computed outside the try below, like `settings()`/`resolve()` calls
+    // elsewhere in this file (`configuration()`, `startLogin()`): it calls
+    // the consumer's `resolve()` config function via `callbackUrl()` ->
+    // `settings()`, so a throw from that function (or from `new URL()` on a
+    // malformed `requestUrl`) must propagate unwrapped, not get mislabeled
+    // as `exchange_failed`. Only `client.authorizationCodeGrant()` itself is
+    // allowed to produce `exchange_failed`.
+    const redirectUri = callbackUrlFor(requestUrl);
 
     let tokens: client.TokenEndpointResponse &
       client.TokenEndpointResponseHelpers;
     try {
-      tokens = await client.authorizationCodeGrant(
-        config,
-        callbackUrlFor(requestUrl),
-        {
-          expectedState: flow.state,
-          expectedNonce: flow.nonce,
-          pkceCodeVerifier: flow.verifier,
-          idTokenExpected: true
-        }
-      );
+      tokens = await client.authorizationCodeGrant(config, redirectUri, {
+        expectedState: flow.state,
+        expectedNonce: flow.nonce,
+        pkceCodeVerifier: flow.verifier,
+        idTokenExpected: true
+      });
     } catch (error) {
       throw new AuthError('exchange_failed', { cause: error });
     }
