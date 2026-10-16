@@ -386,11 +386,18 @@ describe('createAuth - exchange_failed scope', () => {
 
 // The insecure-http gate must be default-deny: a plain-http issuer is only
 // ever allowed when the caller explicitly opts in via `allowInsecureHttp`,
-// AND `NODE_ENV` is not 'production'. In particular an unset NODE_ENV (very
-// common outside Next.js, e.g. scripts/workers) must never, by itself, open
-// the gate. Each test below creates its own fresh createAuth() instance for
-// the same reason as the discovery-failure-handling tests above: `discovered`
-// is cached per closure, so a shared instance would only ever call
+// AND `NODE_ENV` is not 'production', AND the issuer's hostname is a
+// loopback address (exactly `localhost`, `127.0.0.1`, `[::1]`, or a hostname
+// ending in `.localhost`). In particular an unset NODE_ENV (very common
+// outside Next.js, e.g. scripts/workers) must never, by itself, open the
+// gate, and neither may a non-loopback plain-http hostname even with the
+// flag on and a non-production NODE_ENV. The tests below that only exercise
+// the allowInsecureHttp/NODE_ENV logic deliberately use a loopback issuer
+// (`http://localhost:8080`) so the hostname check never confounds what they
+// claim to test; the hostname allowlist itself is covered separately further
+// down. Each test below creates its own fresh createAuth() instance for the
+// same reason as the discovery-failure-handling tests above: `discovered` is
+// cached per closure, so a shared instance would only ever call
 // client.discovery() once and later tests would just read the stale args.
 describe('createAuth - insecure http gate', () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -435,7 +442,9 @@ describe('createAuth - insecure http gate', () => {
 
   it('rejects a plain-http issuer when allowInsecureHttp is unset and NODE_ENV is undefined', async () => {
     delete process.env.NODE_ENV;
-    const instance = freshAuth({ issuer: 'http://id.local' });
+    // Loopback host, so this exercises only the allowInsecureHttp/NODE_ENV
+    // logic, not the hostname allowlist (covered separately below).
+    const instance = freshAuth({ issuer: 'http://localhost:8080' });
     const callsBefore = vi.mocked(client.discovery).mock.calls.length;
 
     await instance.startLogin('/x');
@@ -445,7 +454,9 @@ describe('createAuth - insecure http gate', () => {
 
   it('rejects a plain-http issuer when allowInsecureHttp is unset and NODE_ENV is "test"', async () => {
     process.env.NODE_ENV = 'test';
-    const instance = freshAuth({ issuer: 'http://id.local' });
+    // Loopback host, so this exercises only the allowInsecureHttp/NODE_ENV
+    // logic, not the hostname allowlist (covered separately below).
+    const instance = freshAuth({ issuer: 'http://localhost:8080' });
     const callsBefore = vi.mocked(client.discovery).mock.calls.length;
 
     await instance.startLogin('/x');
@@ -455,8 +466,10 @@ describe('createAuth - insecure http gate', () => {
 
   it('rejects a plain-http issuer when allowInsecureHttp is explicitly false', async () => {
     delete process.env.NODE_ENV;
+    // Loopback host, so this exercises only the allowInsecureHttp/NODE_ENV
+    // logic, not the hostname allowlist (covered separately below).
     const instance = freshAuth({
-      issuer: 'http://id.local',
+      issuer: 'http://localhost:8080',
       allowInsecureHttp: false
     });
     const callsBefore = vi.mocked(client.discovery).mock.calls.length;
@@ -468,8 +481,10 @@ describe('createAuth - insecure http gate', () => {
 
   it('allows a plain-http issuer when allowInsecureHttp is true and NODE_ENV is not production (local dev)', async () => {
     delete process.env.NODE_ENV;
+    // Loopback host, so this exercises only the allowInsecureHttp/NODE_ENV
+    // logic, not the hostname allowlist (covered separately below).
     const instance = freshAuth({
-      issuer: 'http://id.local',
+      issuer: 'http://localhost:8080',
       allowInsecureHttp: true
     });
     const callsBefore = vi.mocked(client.discovery).mock.calls.length;
@@ -483,6 +498,25 @@ describe('createAuth - insecure http gate', () => {
 
   it('rejects a plain-http issuer when allowInsecureHttp is true but NODE_ENV is "production" (prod override wins even if the flag is left on)', async () => {
     process.env.NODE_ENV = 'production';
+    // Loopback host, so this exercises only the allowInsecureHttp/NODE_ENV
+    // logic, not the hostname allowlist (covered separately below).
+    const instance = freshAuth({
+      issuer: 'http://localhost:8080',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
+  });
+
+  it('rejects a plain-http issuer on a non-loopback hostname even when allowInsecureHttp is true and NODE_ENV is not production', async () => {
+    delete process.env.NODE_ENV;
+    // `id.local` is not itself a loopback hostname (not `localhost`,
+    // `127.0.0.1`, `[::1]`, nor ending in `.localhost`), so the hostname
+    // allowlist must deny this regardless of the flag/NODE_ENV being
+    // otherwise permissive.
     const instance = freshAuth({
       issuer: 'http://id.local',
       allowInsecureHttp: true
@@ -492,6 +526,59 @@ describe('createAuth - insecure http gate', () => {
     await instance.startLogin('/x');
 
     expect(discoveryExecuteArgOfNextCall(callsBefore)()).toBeUndefined();
+  });
+
+  it('allows a plain-http issuer on a loopback hostname other than bare "localhost" when allowInsecureHttp is true and NODE_ENV is not production', async () => {
+    delete process.env.NODE_ENV;
+    // `127.0.0.1` is a loopback address and must be accepted by the hostname
+    // allowlist just like `localhost` is.
+    const instance = freshAuth({
+      issuer: 'http://127.0.0.1:8080',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toEqual({
+      execute: [client.allowInsecureRequests]
+    });
+  });
+
+  it('allows a plain-http issuer on the IPv6 loopback address when allowInsecureHttp is true and NODE_ENV is not production', async () => {
+    delete process.env.NODE_ENV;
+    // `new URL('http://[::1]:8080').hostname` keeps the brackets
+    // (`'[::1]'`), unlike bracket-free IPv6 forms such as `net.isIP()` output
+    // or a socket's `remoteAddress`. Regression test for that exact
+    // mismatch: `isLoopbackHost` must compare against `'[::1]'`.
+    const instance = freshAuth({
+      issuer: 'http://[::1]:8080',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toEqual({
+      execute: [client.allowInsecureRequests]
+    });
+  });
+
+  it('allows a plain-http issuer on a *.localhost subdomain when allowInsecureHttp is true and NODE_ENV is not production', async () => {
+    delete process.env.NODE_ENV;
+    // A `*.localhost` subdomain must be accepted by the hostname allowlist
+    // just like bare `localhost` is.
+    const instance = freshAuth({
+      issuer: 'http://zitadel.localhost:8080',
+      allowInsecureHttp: true
+    });
+    const callsBefore = vi.mocked(client.discovery).mock.calls.length;
+
+    await instance.startLogin('/x');
+
+    expect(discoveryExecuteArgOfNextCall(callsBefore)()).toEqual({
+      execute: [client.allowInsecureRequests]
+    });
   });
 
   it('never opens the insecure gate for an https issuer, even when allowInsecureHttp is true and NODE_ENV is undefined', async () => {
