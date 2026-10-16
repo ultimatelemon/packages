@@ -17,7 +17,9 @@ export interface AuthConfig {
   callbackPath?: string;
   scope?: string;
   sessionMaxAgeSeconds?: number;
-  // Accept a plain-http issuer (local dev only). Ignored whenever
+  // Accept a plain-http issuer, but only on a loopback hostname (`localhost`,
+  // `127.0.0.1`, `[::1]`, or a `*.localhost` subdomain) — local dev only, and
+  // enforced in code, not just by convention. Also ignored whenever
   // `NODE_ENV === 'production'`, so leaving this on by accident in a
   // deployed environment does not re-enable plaintext OIDC traffic.
   allowInsecureHttp?: boolean;
@@ -125,6 +127,25 @@ function text(source: Record<string, unknown>, key: string): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+// A loopback hostname is what makes `allowInsecureHttp` actually "local dev
+// only": localhost, 127.0.0.1/[::1], and *.localhost subdomains. Compared
+// against `URL#hostname`, which `new URL()` already lowercases and
+// normalizes (alternate IPv4 notations collapse to `127.0.0.1`), so a plain
+// allowlist check is enough — no `net.isIP`, no DNS lookups. Note that
+// `URL#hostname` keeps the brackets for an IPv6 literal (e.g.
+// `new URL('http://[::1]:8080').hostname === '[::1]'`), unlike e.g.
+// `net.isIP()` or a socket's `remoteAddress`, which are bracket-free. This
+// only checks the issuer itself: a loopback issuer whose discovery document
+// points at a non-loopback token/jwks endpoint is not covered here.
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]' ||
+    hostname.endsWith('.localhost')
+  );
+}
+
 export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
   const resolve = typeof options === 'function' ? options : () => options;
   let discovered: Promise<client.Configuration> | null = null;
@@ -158,9 +179,14 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
       // opts in explicitly via `allowInsecureHttp` — a missing/unknown
       // NODE_ENV must never open this up on its own (default-deny) — and
       // never in production, regardless of that flag, so a misconfigured
-      // http issuer in production fails loudly instead.
+      // http issuer in production fails loudly instead. Also restricted to a
+      // loopback issuer hostname, so "local dev only" is a guarantee rather
+      // than a comment: a plain-http issuer on any other host (a Docker
+      // network address, an internal hostname, ...) is rejected the same way
+      // as any other disallowed http issuer, below.
       const insecure =
         issuer.protocol === 'http:' &&
+        isLoopbackHost(issuer.hostname) &&
         s.allowInsecureHttp === true &&
         process.env.NODE_ENV !== 'production';
       discovered = client

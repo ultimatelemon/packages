@@ -31,18 +31,18 @@ export const auth = createAuth(() => ({
 Pass a function: nothing is read until the first login or session check, so
 `next build` without env does not fail on an import.
 
-| Option                 | Default                  | Does                                                                                 |
-| ---------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
-| `issuer`               | required                 | Zitadel instance URL                                                                 |
-| `clientId`             | required                 | OIDC client id                                                                       |
-| `clientSecret`         | required                 | OIDC client secret                                                                   |
-| `appUrl`               | required                 | Public URL of the app, including base path                                           |
-| `sessionSecret`        | required                 | HS256 key for the session, 32+ characters                                            |
-| `cookiePrefix`         | `'ul'`                   | Cookies become `__Host-<prefix>_session`                                             |
-| `callbackPath`         | `'/api/auth/callback'`   | Register `appUrl + callbackPath` in Zitadel                                          |
-| `scope`                | `'openid profile email'` |                                                                                      |
-| `sessionMaxAgeSeconds` | 14 days                  | After this, back through Zitadel                                                     |
-| `allowInsecureHttp`    | `false`                  | Allow a plain-http issuer (local dev only; ignored when `NODE_ENV === 'production'`) |
+| Option                 | Default                  | Does                                                                                                                                               |
+| ---------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `issuer`               | required                 | Zitadel instance URL                                                                                                                               |
+| `clientId`             | required                 | OIDC client id                                                                                                                                     |
+| `clientSecret`         | required                 | OIDC client secret                                                                                                                                 |
+| `appUrl`               | required                 | Public URL of the app, including base path                                                                                                         |
+| `sessionSecret`        | required                 | HS256 key for the session, 32+ characters                                                                                                          |
+| `cookiePrefix`         | `'ul'`                   | Cookies become `__Host-<prefix>_session`                                                                                                           |
+| `callbackPath`         | `'/api/auth/callback'`   | Register `appUrl + callbackPath` in Zitadel                                                                                                        |
+| `scope`                | `'openid profile email'` |                                                                                                                                                    |
+| `sessionMaxAgeSeconds` | 14 days                  | After this, back through Zitadel                                                                                                                   |
+| `allowInsecureHttp`    | `false`                  | Allow a plain-http issuer on a loopback hostname only (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`); ignored when `NODE_ENV === 'production'` |
 
 ## Next.js
 
@@ -163,7 +163,10 @@ appUrl)` would drop `/account` from `https://id.example/account`.
   passes a string check for `//` but resolves to another origin.
 - **Local http.** A plain-http issuer is rejected unless the consumer opts in
   with `allowInsecureHttp: true` — and never in production, regardless of that
-  flag. Without the opt-in, discovery itself fails against a plain-http
-  issuer, surfacing as `AuthError('discovery_failed')` like any other
-  discovery failure.
+  flag. The opt-in also only applies to a loopback issuer hostname
+  (`localhost`, `127.0.0.1`, `[::1]`, or a `*.localhost` subdomain); a
+  plain-http issuer on any other hostname is rejected even with
+  `allowInsecureHttp: true`. Without the opt-in, or on a non-loopback host,
+  discovery itself fails against a plain-http issuer, surfacing as
+  `AuthError('discovery_failed')` like any other discovery failure.
 - **Discovery** is cached per process, and retried after a failure.
