@@ -163,7 +163,7 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
         issuer.protocol === 'http:' &&
         s.allowInsecureHttp === true &&
         process.env.NODE_ENV !== 'production';
-      discovered = client
+      const attempt: Promise<client.Configuration> = client
         .discovery(
           issuer,
           s.clientId,
@@ -172,9 +172,22 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
           insecure ? { execute: [client.allowInsecureRequests] } : undefined
         )
         .catch((error: unknown) => {
-          discovered = null;
+          // Only clear the cache if this attempt is still the current one —
+          // the same identity-check pattern as the INF-81 fix in accounts'
+          // oidc.ts. Here the check-and-assign above has no `await` in
+          // between and this catch is the only other writer of `discovered`,
+          // so a newer attempt can only exist once this one has already
+          // settled: `discovered === attempt` always holds when this runs
+          // today. The check is defensive hardening against that invariant
+          // ever changing (e.g. a future caching strategy with a real gap
+          // between the check and the assignment), not a fix for a race
+          // that is reachable through the public API right now.
+          if (discovered === attempt) {
+            discovered = null;
+          }
           throw new AuthError('discovery_failed', { cause: error });
         });
+      discovered = attempt;
     }
     return discovered;
   }

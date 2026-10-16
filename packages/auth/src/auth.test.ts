@@ -264,6 +264,58 @@ describe('createAuth - discovery failure handling', () => {
     expect(typeof result.url).toBe('string');
     expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
   });
+
+  // PKG-13 changes configuration()'s catch handler so it only clears
+  // `discovered` when `discovered === attempt` still holds (see the comment
+  // on that check in auth.ts for why a literal overlapping race cannot be
+  // constructed through the public API today, and why this is therefore
+  // defensive hardening rather than a fix for a reachable bug). What this
+  // test does cover, and what was missing before: concurrent callers that
+  // start before the in-flight discovery settles all share the exact same
+  // `attempt` promise, so a single shared failure only triggers one
+  // client.discovery() call (not one per waiting caller), and a later call
+  // still retries successfully.
+  it('shares one in-flight discovery attempt across concurrent callers, and a later call retries after the shared failure', async () => {
+    const instance = freshAuth();
+    const discoveryMock = vi.mocked(client.discovery);
+    const callsBefore = discoveryMock.mock.calls.length;
+
+    let rejectShared!: (error: unknown) => void;
+    const pending = new Promise<client.Configuration>((_resolve, reject) => {
+      rejectShared = reject;
+    });
+    discoveryMock.mockImplementationOnce(() => pending);
+
+    // Three callers, issued back-to-back before the shared discovery attempt
+    // settles, must all observe the same `discovered` promise.
+    const callA = instance.startLogin('/x');
+    const callB = instance.startLogin('/x');
+    const callC = instance.startLogin('/x');
+    expect(discoveryMock.mock.calls.length).toBe(callsBefore + 1);
+
+    const underlying = new Error('network down');
+    rejectShared(underlying);
+
+    await expect(callA).rejects.toMatchObject({
+      code: 'discovery_failed',
+      cause: underlying
+    });
+    await expect(callB).rejects.toMatchObject({
+      code: 'discovery_failed',
+      cause: underlying
+    });
+    await expect(callC).rejects.toMatchObject({
+      code: 'discovery_failed',
+      cause: underlying
+    });
+
+    // The cache was cleared by the shared failure, so a later call retries
+    // discovery (the mock's default implementation resolves) instead of
+    // being stuck on the failed attempt.
+    const result = await instance.startLogin('/x');
+    expect(typeof result.url).toBe('string');
+    expect(discoveryMock.mock.calls.length).toBe(callsBefore + 2);
+  });
 });
 
 // The insecure-http gate must be default-deny: a plain-http issuer is only
