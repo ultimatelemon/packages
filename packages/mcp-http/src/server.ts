@@ -44,7 +44,11 @@ const silent: Logger = { error: () => {} };
 // a chance to finish first. 5000ms mirrors `DEFAULT_CONNECTION_TIMEOUT_MS` in
 // packages/drizzle/src/client.ts and stays well under the grace period an
 // orchestrator (Dokploy/k8s) gives a process before SIGKILL (typically
-// 10-30s). This is intentionally internal and not exposed on `McpHttpOptions`.
+// 10-30s). packages/drizzle/src/client.ts's closeDb() has its own, longer
+// CLOSE_TIMEOUT_MS backstop for the same class of problem (PKG-18); the two
+// are chosen independently, since a stuck DB client and a stuck HTTP
+// keep-alive socket have different acceptable wait times. This is
+// intentionally internal and not exposed on `McpHttpOptions`.
 const FORCE_CLOSE_TIMEOUT_MS = 5000;
 const IDLE_SWEEP_INTERVAL_MS = 250;
 
