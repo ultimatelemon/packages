@@ -36,6 +36,15 @@ describe('createDb', () => {
     vi.restoreAllMocks();
   });
 
+  // Any test below that calls vi.useFakeTimers() must not leak fake timers
+  // into a later test (which would otherwise hang or fail for an unrelated
+  // reason). Restore real timers unconditionally after every test, not just
+  // the ones that use fake timers, so a failed assertion inside a
+  // fake-timer test can never skip this cleanup.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('reads no env and opens no pool until the first use', () => {
     const client = createDb({ schema, cacheKey: nextKey() });
     expect(() => client.getPool()).toThrow('DATABASE_URL is missing');
@@ -409,6 +418,186 @@ describe('createDb', () => {
     expect((secondError as DbCloseError).cause).toBe(
       (firstError as DbCloseError).cause
     );
+  });
+
+  // PKG-18: closeDb() must not hang forever on a checked-out client (a
+  // forgotten pool.connect() without release, or a never-committed
+  // transaction) that keeps pg-pool's own pool.end() pending indefinitely.
+  // pg-pool's real pool.end() only settles once every checked-out client has
+  // been released, so stubbing it to never settle at all is the accurate
+  // stand-in for that scenario without needing a real stuck connection.
+
+  it('resolves closeDb() within the fixed close timeout instead of hanging forever when pool.end() never settles (e.g. a client still checked out)', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    // Never resolves and never rejects: exactly pg-pool's own behaviour for
+    // pool.end() while at least one client is still checked out.
+    // mockImplementation (not mockReturnValue): pg's `end()` is overloaded
+    // (`end(): Promise<void>` and `end(callback): void`), and
+    // mockReturnValue's parameter type resolves against the callback
+    // overload, rejecting a Promise<void> argument.
+    vi.spyOn(pool, 'end').mockImplementation(() => new Promise<void>(() => {}));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    vi.useFakeTimers();
+    const closePromise = client.closeDb();
+    // Advance by the documented timeout constant (CLOSE_TIMEOUT_MS = 10_000
+    // in client.ts); a real wall-clock wait of 10s has no place in a unit
+    // test, so fake timers are mandatory here.
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // closeDb() must resolve (not reject) once the timeout gives up waiting
+    // on the still-pending pool.end() -- a hanging client must not turn a
+    // clean shutdown path into a crash.
+    await expect(closePromise).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // Giving up must also clear the cached pool, so the next getPool() call
+    // builds a fresh one instead of returning the one we walked away from.
+    expect(client.getPool()).not.toBe(pool);
+  });
+
+  it('warns with the cacheKey and the number of still checked-out/waiting clients when the close timeout fires, without leaking connection details', async () => {
+    const cacheKey = nextKey();
+    const connectionString =
+      'postgresql://user:super-secret-password@localhost:5432/app';
+    const client = createDb({ schema, cacheKey, connectionString });
+    const pool = client.getPool();
+    // mockImplementation, see the comment on the identical stub above.
+    vi.spyOn(pool, 'end').mockImplementation(() => new Promise<void>(() => {}));
+    // totalCount/waitingCount are real pg-pool Pool getters; stub them so the
+    // warning's reported numbers can be asserted precisely without needing
+    // an actual checked-out client.
+    vi.spyOn(pool, 'totalCount', 'get').mockReturnValue(4);
+    vi.spyOn(pool, 'waitingCount', 'get').mockReturnValue(2);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    vi.useFakeTimers();
+    const closePromise = client.closeDb();
+    await vi.advanceTimersByTimeAsync(10_000); // must match CLOSE_TIMEOUT_MS
+    await closePromise;
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const message = warnSpy.mock.calls[0]?.join(' ') ?? '';
+    // Mentions giving up waiting, which cache/pool it gave up on, and how
+    // many clients were still checked out or waiting.
+    expect(message.toLowerCase()).toMatch(
+      /gave up|giving up|timed out|timeout/
+    );
+    expect(message).toContain(cacheKey);
+    expect(message).toMatch(/\b4\b/);
+    expect(message).toMatch(/\b2\b/);
+    // Must never leak the connection string, the password inside it, or any
+    // query text into a log line.
+    expect(message).not.toContain(connectionString);
+    expect(message).not.toContain('super-secret-password');
+  });
+
+  it('logs a second warning (not an unhandled rejection) when the abandoned pool.end() call eventually rejects after closeDb() already resolved via the timeout', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    let rejectPoolEnd!: (error: unknown) => void;
+    // Simulates the abandoned real pool.end() call settling (badly) only
+    // after closeDb() has already given up on it and resolved.
+    // mockImplementation, see the comment on the identical stub above.
+    vi.spyOn(pool, 'end').mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectPoolEnd = reject;
+        })
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      vi.useFakeTimers();
+      const closePromise = client.closeDb();
+      await vi.advanceTimersByTimeAsync(10_000); // must match CLOSE_TIMEOUT_MS
+      await expect(closePromise).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+
+      // Settle the abandoned pool.end() promise now, well after closeDb()
+      // already resolved. Promise.race already attaches a handler to this
+      // promise (so Node would never report it as unhandled regardless of
+      // whether client.ts adds its own .catch()); what actually proves
+      // client.ts's own `.catch()` ran is the *second* console.warn below
+      // naming the late failure -- without it, this rejection would be
+      // silently swallowed instead.
+      rejectPoolEnd(new Error('connection reset by peer'));
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(unhandledRejections).toHaveLength(0);
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+      const secondMessage = warnSpy.mock.calls[1]?.join(' ') ?? '';
+      expect(secondMessage).toMatch(/connection reset by peer/);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+  }, 2000);
+
+  it('resolves closeDb() comfortably under the close timeout and does not warn when there are no checked-out clients (no fixed delay on the success path)', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    client.getPool();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const startedAt = performance.now();
+    await client.closeDb();
+    const elapsedMs = performance.now() - startedAt;
+
+    // A regression that always waits out (part of) the new close-timeout
+    // budget, even with nothing to wait for, must fail this assertion; real
+    // pool.end() against an unreachable host settles essentially
+    // immediately once no client is checked out, so this has generous
+    // headroom below CLOSE_TIMEOUT_MS (10_000ms) without being a flaky,
+    // razor-thin bound.
+    expect(elapsedMs).toBeLessThan(500);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('still rejects with a DbCloseError (PKG-16 behaviour) when pool.end() rejects well before the close timeout fires', async () => {
+    const client = createDb({
+      schema,
+      cacheKey: nextKey(),
+      connectionString: 'postgresql://localhost/app'
+    });
+    const pool = client.getPool();
+    const poolEndError = new Error('Called end on pool more than once');
+    vi.spyOn(pool, 'end').mockRejectedValue(poolEndError);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    vi.useFakeTimers();
+    let caught: unknown;
+    try {
+      // Nothing to advance: the mocked pool.end() rejects on its own
+      // microtask, long before the 10s close timeout would ever fire. The
+      // race added for PKG-18 must not change this existing PKG-16 outcome.
+      await client.closeDb();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DbCloseError);
+    expect((caught as DbCloseError).cause).toBe(poolEndError);
+    // The timeout branch must not have fired alongside the real rejection.
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
 

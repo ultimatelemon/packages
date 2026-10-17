@@ -110,6 +110,15 @@ while it is checked out). `createDb` attaches a listener for both cases —
 | `getPool()` | The `pg` pool, for `LISTEN`, raw queries or health checks |
 | `closeDb()` | Ends the pool; the next query builds a fresh one          |
 
+If a client is still checked out when `closeDb()` is called (a forgotten
+`pool.connect()` without `release()`, or a transaction that never commits or
+rolls back), `pool.end()` would otherwise never settle, since `pg`/`pg-pool`
+only calls back once every checked-out client has been released. `closeDb()`
+gives up waiting after an internal timeout instead, logging a `console.warn`
+naming the `cacheKey` and how many clients were still checked out; the
+abandoned pool keeps draining in the background and the next
+`getDb()`/`getPool()` call for that `cacheKey` builds a fresh one.
+
 On success, `closeDb()` ends the pool and the next `getDb()`/`getPool()`
 builds a fresh one, as above. If the underlying `pool.end()` rejects —
 in practice this happens when `end()` is called on a pool that is already

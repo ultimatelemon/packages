@@ -64,6 +64,20 @@ const DEFAULT_CONNECTION_TIMEOUT_MS = 5000;
 const DEFAULT_LOCK_TIMEOUT_MS = 3_000;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 10_000;
 const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 10_000;
+// closeDb() waits for pool.end(), but pg-pool only calls its end-callback
+// once every checked-out client is released (see _pulseQueue() in pg-pool's
+// own source); a forgotten pool.connect() without release(), or a
+// transaction that never commits/rolls back, would otherwise leave
+// closeDb() -- and every shutdown path awaiting it -- pending forever
+// (PKG-18). 10_000ms matches this file's own DEFAULT_STATEMENT_TIMEOUT_MS
+// and DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS, so a statement or transaction
+// still running within its own already-allowed budget is not mistaken for a
+// leak. This is deliberately not the same value as mcp-http's
+// FORCE_CLOSE_TIMEOUT_MS (5000ms): that bounds an idle HTTP keep-alive
+// socket, a different resource with a different acceptable wait. Internal,
+// not exposed on CreateDbOptions, for the same reason mcp-http keeps its own
+// constant internal.
+const CLOSE_TIMEOUT_MS = 10_000;
 
 function poolMax(): number {
   const max = Number(process.env.DATABASE_POOL_MAX);
@@ -185,8 +199,68 @@ export function createDb<TSchema extends Schema>(
     // pool more than once" purely because of the overlap, not because of an
     // actual close failure.
     cache.closing ??= (async () => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
-        await pool.end();
+        // pool.end() is called inside the try (not before it) so that, if
+        // it ever threw synchronously, the error would still go through the
+        // catch below and come out as a DbCloseError, and `finally` would
+        // still run to clear `cache.closing` -- keeping a retry possible
+        // instead of permanently replaying one stuck rejection. In
+        // practice pg-pool's own end() never throws synchronously (it
+        // always returns a promise, even for a second/duplicate call), so
+        // this is a defensive ordering rather than a reachable path today.
+        const ended = pool.end();
+        // PKG-18: pg-pool's own pool.end() does not settle -- neither
+        // resolve nor reject -- until every checked-out client has been
+        // released (see _pulseQueue() in pg-pool's source). A forgotten
+        // pool.connect()/release(), or a transaction that never commits or
+        // rolls back, would otherwise leave this await, and every shutdown
+        // path awaiting closeDb(), pending forever. Race it against a
+        // timer instead of awaiting it unconditionally.
+        const timedOut = new Promise<'timeout'>((resolve) => {
+          timeoutId = setTimeout(
+            () => resolve('timeout'),
+            CLOSE_TIMEOUT_MS
+          ).unref();
+        });
+        const outcome = await Promise.race([ended, timedOut]);
+        if (outcome === 'timeout') {
+          // Give up waiting rather than hang the caller's shutdown path
+          // forever; this is "give up", not "force close" -- pg/pg-pool has
+          // no public equivalent of http.Server.closeAllConnections(), so
+          // the pool itself keeps draining whatever client(s) are still
+          // checked out in the background. Only pool.totalCount/
+          // waitingCount (plain counters) are logged, never the pool or
+          // client object, which would carry the connection string.
+          console.warn(
+            `closeDb(cacheKey=${cacheKey}): gave up waiting for pool.end() ` +
+              `after ${CLOSE_TIMEOUT_MS}ms; ${pool.totalCount} client(s) ` +
+              `still checked out or connecting (${pool.waitingCount} ` +
+              'waiting on the pool), most likely a forgotten ' +
+              'pool.connect()/release() or a hung transaction. The pool ' +
+              'keeps draining in the background; the next getPool() call ' +
+              'for this cacheKey builds a fresh one.'
+          );
+          // Promise.race already attaches a handler to `ended`, so a later
+          // rejection can never surface as an unhandled rejection; this
+          // .catch() exists so that a late failure is still logged
+          // somewhere (we stopped awaiting `ended`, so without this the
+          // outcome would otherwise be silently dropped).
+          ended.catch((error: unknown) => {
+            console.warn(
+              `closeDb(cacheKey=${cacheKey}): the abandoned pool.end() ` +
+                `call later rejected: ${String(error)}`
+            );
+          });
+          // Unlike the error path below, there is nothing salvageable about
+          // this pool to keep around: we are not waiting for it to tell us
+          // whether it is usable again, we are walking away from it. The
+          // next getDb()/getPool() call for this cacheKey builds a fresh
+          // pool rather than returning one we already gave up on.
+          cache.pool = undefined;
+          cache.db = undefined;
+          return;
+        }
       } catch (error: unknown) {
         // Deliberately leave cache.pool/cache.db untouched: pg-pool marks
         // the pool as ending the moment end() is called, so this pool can
@@ -202,6 +276,7 @@ export function createDb<TSchema extends Schema>(
           cause: error
         });
       } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
         // Clear the in-flight marker once this attempt has settled (either
         // way), so the next closeDb() call -- a sequential retry after a
         // failure, or a fresh close after a later getPool() rebuilt the
