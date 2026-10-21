@@ -35,6 +35,7 @@ jobs:
       - name: publish what is not on npm yet
         run: |
           published=0
+          failed=''
           for dir in packages/*/; do
             name=$(node -p "require('./${dir}package.json').name")
             version=$(node -p "require('./${dir}package.json').version")
@@ -42,8 +43,17 @@ jobs:
               echo "$name@$version is already on npm"
             else
               echo "publishing $name@$version"
-              npm publish --workspace "$name" --access public
-              published=$((published + 1))
+              # One package without npm publish rights must not block the rest.
+              if npm publish --workspace "$name" --access public; then
+                published=$((published + 1))
+              else
+                echo "::error::failed to publish $name@$version"
+                failed="$failed $name@$version"
+              fi
             fi
           done
           echo "published $published package(s)"
+          if [ -n "$failed" ]; then
+            echo "::error::not published:$failed"
+            exit 1
+          fi
