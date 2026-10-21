@@ -4,17 +4,27 @@ import {
   type Server,
   type ServerResponse
 } from 'node:http';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { toNodeHandler } from '@modelcontextprotocol/node';
+import { createMcpHandler, type McpServer } from '@modelcontextprotocol/server';
 
 /** The slice of a pino-style logger this package calls. */
 export interface Logger {
   error(obj: object, msg?: string): void;
 }
 
+export interface RequestContext {
+  /** The caller's own key for the upstream API. Set when `apiKey` is configured. */
+  apiKey?: string;
+}
+
+export interface ApiKeyOptions {
+  /** Added to the 401 message, e.g. where to get a key. */
+  hint?: string;
+}
+
 export interface McpHttpOptions {
   /** Builds a fresh server per request; the transport is stateless. */
-  createMcpServer: () => McpServer;
+  createMcpServer: (context: RequestContext) => McpServer | Promise<McpServer>;
   port: number;
   /** Interface to listen on. Default `0.0.0.0`. */
   host?: string;
@@ -22,6 +32,8 @@ export interface McpHttpOptions {
   basePath?: string;
   /** Readiness for `/healthz`; return false for a 503. Default: always ready. */
   health?: () => boolean | Promise<boolean>;
+  /** Require every MCP request to carry the caller's key in `X-Api-Key` or `Authorization: Bearer`. */
+  apiKey?: ApiKeyOptions;
   logger?: Logger;
 }
 
@@ -71,6 +83,14 @@ function jsonRpcError(res: ServerResponse, status: number, message: string) {
   });
 }
 
+function apiKeyFrom(req: IncomingMessage): string | undefined {
+  const header = req.headers['x-api-key'];
+  const direct = (Array.isArray(header) ? header[0] : header)?.trim();
+  if (direct) return direct;
+  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '');
+  return bearer?.[1]?.trim() || undefined;
+}
+
 // PKG-10: closes `http`, letting in-flight requests finish normally. A
 // one-off `closeIdleConnections()` call only catches connections that are
 // already idle at the exact moment close() runs; any connection that is
@@ -109,36 +129,51 @@ export async function startMcpHttpServer(
   const mcpPaths = new Set([`${base}/mcp`, '/mcp']);
   const healthPaths = new Set([`${base}/healthz`, '/healthz']);
 
+  // The key travels as pass-through authInfo, the SDK's channel from the
+  // HTTP request to the per-request factory.
+  const mcpHandler = createMcpHandler(
+    ({ authInfo }) =>
+      options.createMcpServer(authInfo ? { apiKey: authInfo.token } : {}),
+    {
+      onerror: (error) => {
+        logger.error({ err: String(error) }, 'mcp request failed');
+      }
+    }
+  );
+  const nodeHandler = toNodeHandler(mcpHandler, {
+    onerror: (error) => {
+      logger.error({ err: String(error) }, 'mcp request failed');
+    }
+  });
+
   async function handleMcp(req: IncomingMessage, res: ServerResponse) {
-    // Stateless mode has no session to attach a GET stream or a DELETE to.
+    // Stateless serving has no session to attach a GET stream or a DELETE to.
     if (req.method !== 'POST') {
       res.setHeader('allow', 'POST');
       jsonRpcError(res, 405, 'Method not allowed');
       return;
     }
-    const server = options.createMcpServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true
-    });
-    res.on('close', () => {
-      // This listener is synchronous, so try/catch can't catch a later
-      // rejection; guard each call with its own .catch() instead and log it.
-      transport.close().catch((error: unknown) => {
-        logger.error(
-          { err: String(error), url: req.url },
-          'transport close failed'
-        );
-      });
-      server.close().catch((error: unknown) => {
-        logger.error(
-          { err: String(error), url: req.url },
-          'mcp server close failed'
-        );
-      });
-    });
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
+    if (!options.apiKey) {
+      await nodeHandler(req, res);
+      return;
+    }
+    const apiKey = apiKeyFrom(req);
+    if (!apiKey) {
+      const hint = options.apiKey.hint ? ` ${options.apiKey.hint}` : '';
+      res.setHeader('www-authenticate', 'Bearer');
+      jsonRpcError(
+        res,
+        401,
+        `Missing API key: send it in the X-Api-Key header or as Authorization: Bearer <key>.${hint}`
+      );
+      return;
+    }
+    await nodeHandler(
+      Object.assign(req, {
+        auth: { token: apiKey, clientId: 'api-key', scopes: [] }
+      }),
+      res
+    );
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -179,6 +214,9 @@ export async function startMcpHttpServer(
   return {
     url: `http://${shownHost}:${String(port)}${base}/mcp`,
     port,
-    close: () => closeHttpServer(http)
+    close: async () => {
+      await closeHttpServer(http);
+      await mcpHandler.close();
+    }
   };
 }
