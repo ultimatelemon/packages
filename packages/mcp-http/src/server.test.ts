@@ -69,6 +69,13 @@ describe('startMcpHttpServer', () => {
     await client.close();
   });
 
+  it('also answers on the base path itself', async () => {
+    const client = await connect(`${base}/tools`);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toEqual(['echo']);
+    await client.close();
+  });
+
   it('also answers on /mcp without the base path', async () => {
     const client = await connect(`${base}/mcp`);
     const { tools } = await client.listTools();

@@ -35,15 +35,15 @@ process.once('SIGTERM', () => {
 
 ## Options
 
-| Option            | Default     | Does                                                         |
-| ----------------- | ----------- | ------------------------------------------------------------ |
-| `createMcpServer` | required    | Returns a new `McpServer` per request, given `{ apiKey }`    |
-| `port`            | required    | `0` picks a free port; read it back from `.port`             |
-| `host`            | `'0.0.0.0'` | `'127.0.0.1'` keeps it local                                 |
-| `basePath`        | `''`        | Also serve `<basePath>/mcp` and `<basePath>/healthz`         |
-| `health`          | always ok   | Return `false` for a 503 on `/healthz`                       |
-| `apiKey`          | off         | Require the caller's key; `hint` is added to the 401 message |
-| `logger`          | silent      | Anything with `error(obj, msg)`, such as pino                |
+| Option            | Default     | Does                                                                          |
+| ----------------- | ----------- | ----------------------------------------------------------------------------- |
+| `createMcpServer` | required    | Returns a new `McpServer` per request, given `{ apiKey }`                     |
+| `port`            | required    | `0` picks a free port; read it back from `.port`                              |
+| `host`            | `'0.0.0.0'` | `'127.0.0.1'` keeps it local                                                  |
+| `basePath`        | `''`        | Also serve MCP on `<basePath>` and `<basePath>/mcp`, and `<basePath>/healthz` |
+| `health`          | always ok   | Return `false` for a 503 on `/healthz`                                        |
+| `apiKey`          | off         | Require the caller's key; `hint` is added to the 401 message                  |
+| `logger`          | silent      | Anything with `error(obj, msg)`, such as pino                                 |
 
 It returns `{ url, port, close() }`.
 

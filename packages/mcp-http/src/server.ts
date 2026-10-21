@@ -28,7 +28,7 @@ export interface McpHttpOptions {
   port: number;
   /** Interface to listen on. Default `0.0.0.0`. */
   host?: string;
-  /** Prefix a proxy leaves on the path, e.g. `/ns`. Both `/mcp` and `<basePath>/mcp` are served. */
+  /** Prefix a proxy leaves on the path, e.g. `/ns`. MCP is served on `/mcp`, `<basePath>/mcp` and `<basePath>` itself. */
   basePath?: string;
   /** Readiness for `/healthz`; return false for a 503. Default: always ready. */
   health?: () => boolean | Promise<boolean>;
@@ -127,6 +127,7 @@ export async function startMcpHttpServer(
   const logger = options.logger ?? silent;
   const base = normalizeBasePath(options.basePath);
   const mcpPaths = new Set([`${base}/mcp`, '/mcp']);
+  if (base) mcpPaths.add(base);
   const healthPaths = new Set([`${base}/healthz`, '/healthz']);
 
   // The key travels as pass-through authInfo, the SDK's channel from the
