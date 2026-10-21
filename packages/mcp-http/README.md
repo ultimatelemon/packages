@@ -53,7 +53,8 @@ With `apiKey` set, every request to `/mcp` must carry the caller's own key for
 the upstream API, in `X-Api-Key` or as `Authorization: Bearer <key>`
 (`X-Api-Key` wins when both are present). Without one the server answers 401
 before building an MCP server. The key reaches `createMcpServer` as
-`apiKey`; it is never logged or stored.
+`apiKey`; it is never logged or stored. Other per-caller settings can travel
+as headers of their own, read from `headers` in the same context.
 
 This suits public servers where each user brings their own credentials: no
 OAuth, no sessions, no database. In claude.ai, add the connector with

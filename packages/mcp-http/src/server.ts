@@ -15,6 +15,8 @@ export interface Logger {
 export interface RequestContext {
   /** The caller's own key for the upstream API. Set when `apiKey` is configured. */
   apiKey?: string;
+  /** Headers of the HTTP request, for per-caller settings beyond the key. */
+  headers: Headers;
 }
 
 export interface ApiKeyOptions {
@@ -133,8 +135,11 @@ export async function startMcpHttpServer(
   // The key travels as pass-through authInfo, the SDK's channel from the
   // HTTP request to the per-request factory.
   const mcpHandler = createMcpHandler(
-    ({ authInfo }) =>
-      options.createMcpServer(authInfo ? { apiKey: authInfo.token } : {}),
+    ({ authInfo, requestInfo }) =>
+      options.createMcpServer({
+        ...(authInfo ? { apiKey: authInfo.token } : {}),
+        headers: requestInfo?.headers ?? new Headers()
+      }),
     {
       onerror: (error) => {
         logger.error({ err: String(error) }, 'mcp request failed');

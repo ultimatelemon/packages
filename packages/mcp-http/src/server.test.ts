@@ -159,6 +159,16 @@ describe('startMcpHttpServer - caller API key', () => {
     await client.close();
   });
 
+  it('hands the request headers to the factory', async () => {
+    const client = await connect(keyed.url, {
+      'x-api-key': 'key',
+      'x-setting': 'on'
+    });
+    await client.listTools();
+    expect(seen.at(-1)?.headers.get('x-setting')).toBe('on');
+    await client.close();
+  });
+
   it('prefers X-Api-Key over Authorization', async () => {
     const client = await connect(keyed.url, {
       'x-api-key': 'direct',
