@@ -12,7 +12,9 @@
     "build": "npm run build --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit --project packages/drizzle/tsconfig.test.json && tsc --noEmit --project packages/datetime/tsconfig.test.json && tsc --noEmit --project packages/auth/tsconfig.test.json && tsc --noEmit --project packages/mcp-http/tsconfig.test.json && tsc --noEmit --project packages/fetch-client/tsconfig.test.json && tsc --noEmit --project packages/crypto/tsconfig.test.json",
+    "pretypecheck": "npm run build --workspace @ultimatelemon-eu/crypto",
+    "typecheck": "tsc --noEmit --project packages/drizzle/tsconfig.test.json && tsc --noEmit --project packages/datetime/tsconfig.test.json && tsc --noEmit --project packages/auth/tsconfig.test.json && tsc --noEmit --project packages/mcp-http/tsconfig.test.json && tsc --noEmit --project packages/fetch-client/tsconfig.test.json && tsc --noEmit --project packages/crypto/tsconfig.test.json && tsc --noEmit --project packages/ui/tsconfig.test.json",
+    "pretest": "npm run build --workspace @ultimatelemon-eu/crypto",
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
