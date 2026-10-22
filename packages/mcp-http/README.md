@@ -43,6 +43,7 @@ process.once('SIGTERM', () => {
 | `basePath`        | `''`        | Also serve MCP on `<basePath>` and `<basePath>/mcp`, and `<basePath>/healthz` |
 | `health`          | always ok   | Return `false` for a 503 on `/healthz`                                        |
 | `apiKey`          | off         | Require the caller's key; `hint` is added to the 401 message                  |
+| `oauth`           | off         | Let callers sign in with the upstream service; see [OAuth](#oauth)            |
 | `logger`          | silent      | Anything with `error(obj, msg)`, such as pino                                 |
 
 It returns `{ url, port, close() }`.
@@ -57,8 +58,66 @@ before building an MCP server. The key reaches `createMcpServer` as
 as headers of their own, read from `headers` in the same context.
 
 This suits public servers where each user brings their own credentials: no
-OAuth, no sessions, no database. In claude.ai, add the connector with
+sessions, no database. In claude.ai, add the connector with
 "No sign-in" and the key as a request header.
+
+## OAuth
+
+With `oauth` set, the server is also an OAuth 2.1 authorization server in front
+of an upstream provider, so a client such as claude.ai can connect with a
+sign-in instead of a pasted key. It needs `ENCRYPTION_KEY` (32 bytes, base64)
+and keeps no state: client registrations, codes and tokens are sealed with that
+key, and the upstream token travels inside the access token.
+
+```ts
+import { oauth2Upstream, startMcpHttpServer } from '@ultimatelemon-eu/mcp-http';
+
+await startMcpHttpServer({
+  createMcpServer: ({ apiKey, oauth }) => buildServer(apiKey, oauth?.settings),
+  port: 3000,
+  basePath: '/example',
+  apiKey: {},
+  oauth: {
+    publicUrl: 'https://mcp.example.com',
+    name: 'Example',
+    upstream: oauth2Upstream({
+      authorizeUrl: 'https://example.com/oauth/authorize',
+      tokenUrl: 'https://example.com/oauth/token',
+      clientId: process.env.EXAMPLE_CLIENT_ID ?? '',
+      clientSecret: process.env.EXAMPLE_CLIENT_SECRET ?? '',
+      scopes: ['read']
+    }),
+    settings: async (accessToken) => ({
+      title: 'Choose an account',
+      fields: [
+        {
+          name: 'account',
+          label: 'Account',
+          options: await accountsOf(accessToken)
+        }
+      ]
+    })
+  }
+});
+```
+
+- Register `<publicUrl><basePath>/oauth/callback` as the redirect URI at the
+  upstream provider.
+- Clients register dynamically (RFC 7591) and must use PKCE (S256).
+- `settings` is optional: a form shown once after the upstream sign-in, with
+  radio or checkbox fields. Submitted values are checked against the options,
+  and the answers reach `createMcpServer` as `oauth.settings` on every request.
+- In `createMcpServer`, `apiKey` holds the upstream access token for both
+  callers who signed in and callers who sent a key.
+- Metadata is served on `<basePath>/.well-known/...` and on
+  `/.well-known/oauth-authorization-server<basePath>` (and the protected
+  resource equivalent). Behind a path-routing proxy, route those root paths to
+  the server too.
+- Access tokens last an hour, or less when the upstream token expires sooner;
+  refresh tokens last 90 days and renew the upstream token when needed.
+- Nothing can be revoked server-side: a user revokes the app at the upstream
+  provider, and rotating `ENCRYPTION_KEY` signs everyone out. A code can be
+  redeemed once per process.
 
 ## Why stateless
 

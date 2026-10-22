@@ -6,6 +6,12 @@ import {
 } from 'node:http';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, type McpServer } from '@modelcontextprotocol/server';
+import { isEncrypted } from '@ultimatelemon-eu/crypto';
+import {
+  createOAuthHandler,
+  type OAuthHandler,
+  type OAuthOptions
+} from './oauth.js';
 
 /** The slice of a pino-style logger this package calls. */
 export interface Logger {
@@ -17,6 +23,8 @@ export interface RequestContext {
   apiKey?: string;
   /** Headers of the HTTP request, for per-caller settings beyond the key. */
   headers: Headers;
+  /** Set when the caller signed in through `oauth`; `apiKey` then holds the upstream token. */
+  oauth?: { settings: Record<string, string> };
 }
 
 export interface ApiKeyOptions {
@@ -36,6 +44,8 @@ export interface McpHttpOptions {
   health?: () => boolean | Promise<boolean>;
   /** Require every MCP request to carry the caller's key in `X-Api-Key` or `Authorization: Bearer`. */
   apiKey?: ApiKeyOptions;
+  /** Sign in with the upstream service instead of pasting a key. Needs `ENCRYPTION_KEY`. */
+  oauth?: OAuthOptions;
   logger?: Logger;
 }
 
@@ -85,12 +95,54 @@ function jsonRpcError(res: ServerResponse, status: number, message: string) {
   });
 }
 
-function apiKeyFrom(req: IncomingMessage): string | undefined {
+function headerKey(req: IncomingMessage): string | undefined {
   const header = req.headers['x-api-key'];
-  const direct = (Array.isArray(header) ? header[0] : header)?.trim();
-  if (direct) return direct;
+  return (Array.isArray(header) ? header[0] : header)?.trim() || undefined;
+}
+
+function bearerFrom(req: IncomingMessage): string | undefined {
   const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '');
   return bearer?.[1]?.trim() || undefined;
+}
+
+const MAX_OAUTH_BODY_BYTES = 64 * 1024;
+
+async function toRequest(req: IncomingMessage): Promise<Request> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > MAX_OAUTH_BODY_BYTES) throw new Error('Request body too large');
+    chunks.push(chunk);
+  }
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (value !== undefined) {
+      headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+    }
+  }
+  const method = req.method ?? 'GET';
+  return new Request(new URL(req.url ?? '/', 'http://localhost'), {
+    method,
+    headers,
+    ...(method === 'GET' || method === 'HEAD'
+      ? {}
+      : { body: Buffer.concat(chunks) })
+  });
+}
+
+async function sendResponse(
+  res: ServerResponse,
+  response: Response
+): Promise<void> {
+  const headers: Record<string, string | string[]> = {};
+  response.headers.forEach((value, name) => {
+    if (name !== 'set-cookie') headers[name] = value;
+  });
+  const cookies = response.headers.getSetCookie();
+  if (cookies.length > 0) headers['set-cookie'] = cookies;
+  res.writeHead(response.status, headers);
+  res.end(Buffer.from(await response.arrayBuffer()));
 }
 
 // PKG-10: closes `http`, letting in-flight requests finish normally. A
@@ -131,6 +183,9 @@ export async function startMcpHttpServer(
   const mcpPaths = new Set([`${base}/mcp`, '/mcp']);
   if (base) mcpPaths.add(base);
   const healthPaths = new Set([`${base}/healthz`, '/healthz']);
+  const oauth: OAuthHandler | undefined = options.oauth
+    ? createOAuthHandler(options.oauth, base)
+    : undefined;
 
   // The key travels as pass-through authInfo, the SDK's channel from the
   // HTTP request to the per-request factory.
@@ -138,6 +193,13 @@ export async function startMcpHttpServer(
     ({ authInfo, requestInfo }) =>
       options.createMcpServer({
         ...(authInfo ? { apiKey: authInfo.token } : {}),
+        ...(authInfo?.extra?.['settings']
+          ? {
+              oauth: {
+                settings: authInfo.extra['settings'] as Record<string, string>
+              }
+            }
+          : {}),
         headers: requestInfo?.headers ?? new Headers()
       }),
     {
@@ -159,18 +221,42 @@ export async function startMcpHttpServer(
       jsonRpcError(res, 405, 'Method not allowed');
       return;
     }
-    if (!options.apiKey) {
+    if (!options.apiKey && !oauth) {
       await nodeHandler(req, res);
       return;
     }
-    const apiKey = apiKeyFrom(req);
+    const bearer = bearerFrom(req);
+    // Tokens this server issued are sealed; an upstream key never looks like one.
+    if (oauth && bearer && isEncrypted(bearer) && !headerKey(req)) {
+      const grant = oauth.authenticate(bearer);
+      if (!grant) {
+        res.setHeader('www-authenticate', oauth.challenge('invalid_token'));
+        jsonRpcError(res, 401, 'The access token is invalid or expired.');
+        return;
+      }
+      await nodeHandler(
+        Object.assign(req, {
+          auth: {
+            token: grant.accessToken,
+            clientId: 'oauth',
+            scopes: [],
+            extra: { settings: grant.settings }
+          }
+        }),
+        res
+      );
+      return;
+    }
+    const apiKey = options.apiKey ? (headerKey(req) ?? bearer) : undefined;
     if (!apiKey) {
-      const hint = options.apiKey.hint ? ` ${options.apiKey.hint}` : '';
-      res.setHeader('www-authenticate', 'Bearer');
+      const hint = options.apiKey?.hint ? ` ${options.apiKey.hint}` : '';
+      res.setHeader('www-authenticate', oauth ? oauth.challenge() : 'Bearer');
       jsonRpcError(
         res,
         401,
-        `Missing API key: send it in the X-Api-Key header or as Authorization: Bearer <key>.${hint}`
+        options.apiKey
+          ? `Missing API key: send it in the X-Api-Key header or as Authorization: Bearer <key>.${hint}`
+          : 'Sign in to use this server.'
       );
       return;
     }
@@ -191,6 +277,10 @@ export async function startMcpHttpServer(
     }
     if (mcpPaths.has(path)) {
       await handleMcp(req, res);
+      return;
+    }
+    if (oauth?.owns(path)) {
+      await sendResponse(res, await oauth.handle(await toRequest(req)));
       return;
     }
     sendJson(res, 404, { error: 'Not found' });
