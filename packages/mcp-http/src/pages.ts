@@ -74,14 +74,18 @@ function page(title: string, body: string): string {
 </html>`;
 }
 
-export function htmlResponse(body: string, status: number): Response {
+export function htmlResponse(
+  body: string,
+  status: number,
+  formTargets: readonly string[] = []
+): Response {
+  const formAction = ["'self'", ...formTargets].join(' ');
   return new Response(body, {
     status,
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      'content-security-policy':
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+      'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; frame-ancestors 'none'`,
       'x-frame-options': 'DENY'
     }
   });

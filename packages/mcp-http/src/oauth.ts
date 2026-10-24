@@ -432,9 +432,11 @@ export function createOAuthHandler(
       },
       STATE_TTL_MS
     );
+    // Browsers apply form-action to the redirect after the POST, so the client's origin must be allowed.
     return htmlResponse(
       settingsPage(form, `${origin}${paths.settings}`, pending),
-      200
+      200,
+      [new URL(flow.r).origin]
     );
   }
 

@@ -153,6 +153,9 @@ async function signIn(
     `/svc/oauth/callback?${new URLSearchParams({ code: 'good', state }).toString()}`
   );
   expect(callback.status).toBe(200);
+  expect(callback.headers.get('content-security-policy')).toContain(
+    `form-action 'self' ${new URL(REDIRECT).origin};`
+  );
   const page = await callback.text();
   const pending = /name="pending" value="([^"]+)"/.exec(page)?.[1] ?? '';
   expect(page).toContain(`action="${PUBLIC}/svc/oauth/settings"`);
