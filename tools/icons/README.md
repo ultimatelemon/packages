@@ -29,7 +29,7 @@ Download the web zip from fontawesome.com, then:
 ```bash
 npm login
 npm run icons:build -- ~/Downloads/fontawesome-pro-plus-7.3.1-web.zip
-npm run icons:publish
+npm run icons:publish -- --otp=<code>
 ```
 
 ## Using it

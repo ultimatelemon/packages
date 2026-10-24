@@ -9,6 +9,7 @@ interface Manifest {
 }
 
 const OUT = join(import.meta.dirname, 'dist');
+const publishArgs = process.argv.slice(2);
 
 function isPublished(name: string, version: string): boolean {
   try {
@@ -36,7 +37,7 @@ for (const dir of readdirSync(OUT)) {
     continue;
   }
   process.stdout.write(`publishing ${id}\n`);
-  execFileSync('npm', ['publish', '--access', 'restricted'], {
+  execFileSync('npm', ['publish', '--access', 'restricted', ...publishArgs], {
     cwd: path,
     stdio: 'inherit'
   });
