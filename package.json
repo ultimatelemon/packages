@@ -13,9 +13,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "pretypecheck": "npm run build --workspace @ultimatelemon-eu/crypto",
-    "typecheck": "tsc --noEmit --project packages/drizzle/tsconfig.test.json && tsc --noEmit --project packages/datetime/tsconfig.test.json && tsc --noEmit --project packages/auth/tsconfig.test.json && tsc --noEmit --project packages/mcp-http/tsconfig.test.json && tsc --noEmit --project packages/fetch-client/tsconfig.test.json && tsc --noEmit --project packages/crypto/tsconfig.test.json && tsc --noEmit --project packages/ui/tsconfig.test.json",
+    "typecheck": "tsc --noEmit --project packages/drizzle/tsconfig.test.json && tsc --noEmit --project packages/datetime/tsconfig.test.json && tsc --noEmit --project packages/auth/tsconfig.test.json && tsc --noEmit --project packages/mcp-http/tsconfig.test.json && tsc --noEmit --project packages/fetch-client/tsconfig.test.json && tsc --noEmit --project packages/crypto/tsconfig.test.json && tsc --noEmit --project packages/ui/tsconfig.test.json && tsc --noEmit --project tools/icons/tsconfig.json",
     "pretest": "npm run build --workspace @ultimatelemon-eu/crypto",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "icons:build": "node tools/icons/generate.ts",
+    "icons:publish": "node tools/icons/publish.ts"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
