@@ -24,6 +24,8 @@ jobs:
 
   deploy:
     needs: publish
+    permissions:
+      contents: read
     uses: ultimatelemon/shared-actions/.github/workflows/dokploy-deploy.yml@v1
     with:
       url: https://ui.ultimatelemon.eu
