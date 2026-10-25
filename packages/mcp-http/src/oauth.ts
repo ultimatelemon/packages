@@ -82,7 +82,7 @@ type Sealed = Seal & { i: string; x?: number };
 
 function sealer(issuer: string) {
   return {
-    seal(value: Seal, ttlMs?: number): string {
+    seal: (value: Seal, ttlMs?: number): string => {
       const sealed: Sealed = {
         ...value,
         i: issuer,
@@ -90,10 +90,10 @@ function sealer(issuer: string) {
       };
       return encrypt(JSON.stringify(sealed));
     },
-    open<T extends Seal['t']>(
+    open: <T extends Seal['t']>(
       value: string | null | undefined,
       type: T
-    ): Extract<Seal, { t: T }> | undefined {
+    ): Extract<Seal, { t: T }> | undefined => {
       if (!value || !isEncrypted(value)) return undefined;
       try {
         const parsed = JSON.parse(decrypt(value)) as Sealed;

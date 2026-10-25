@@ -17,10 +17,14 @@
     "pretest": "npm run build --workspace @ultimatelemon-eu/crypto",
     "test": "npm run test --workspaces --if-present",
     "icons:build": "node tools/icons/generate.ts",
-    "icons:publish": "node tools/icons/publish.ts"
+    "icons:publish": "node tools/icons/publish.ts",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.0"
   }
 }

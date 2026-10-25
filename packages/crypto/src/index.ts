@@ -46,7 +46,7 @@ export function encrypt(plaintext: string): string {
 // Throws when the value was tampered with or sealed under another key.
 export function decrypt(sealed: string): string {
   if (!isEncrypted(sealed)) throw new Error('Not an encrypted value');
-  const [, iv, tag, data] = sealed.split('.').map(decode) as Buffer[];
+  const [, iv, tag, data] = sealed.split('.').map(decode);
   if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) {
     throw new Error('Not an encrypted value');
   }

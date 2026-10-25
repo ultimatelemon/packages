@@ -6,6 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, DbCloseError } from './client.js';
 import { isUniqueViolation } from './errors.js';
 
+// pg's end() also has a callback overload returning void, which makes
+// no-misused-promises reject a Promise-returning stub.
+interface PromiseEnd {
+  end: () => Promise<void>;
+}
+
 const schema = {};
 let key = 0;
 
@@ -48,7 +54,9 @@ describe('createDb', () => {
   it('reads no env and opens no pool until the first use', () => {
     const client = createDb({ schema, cacheKey: nextKey() });
     expect(() => client.getPool()).toThrow('DATABASE_URL is missing');
-    expect(() => client.db.select).toThrow('DATABASE_URL is missing');
+    expect(() => Reflect.get(client.db, 'select')).toThrow(
+      'DATABASE_URL is missing'
+    );
   });
 
   it('reads DATABASE_URL at first use, not at creation', async () => {
@@ -405,8 +413,10 @@ describe('createDb', () => {
 
     expect(firstOutcome.status).toBe('rejected');
     expect(secondOutcome.status).toBe('rejected');
-    const firstError = (firstOutcome as PromiseRejectedResult).reason;
-    const secondError = (secondOutcome as PromiseRejectedResult).reason;
+    const firstError = (firstOutcome as PromiseRejectedResult)
+      .reason as unknown;
+    const secondError = (secondOutcome as PromiseRejectedResult)
+      .reason as unknown;
 
     expect(firstError).toBeInstanceOf(DbCloseError);
     expect(secondError).toBeInstanceOf(DbCloseError);
@@ -440,7 +450,9 @@ describe('createDb', () => {
     // (`end(): Promise<void>` and `end(callback): void`), and
     // mockReturnValue's parameter type resolves against the callback
     // overload, rejecting a Promise<void> argument.
-    vi.spyOn(pool, 'end').mockImplementation(() => new Promise<void>(() => {}));
+    vi.spyOn(pool as PromiseEnd, 'end').mockImplementation(
+      () => new Promise<void>(() => {})
+    );
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     vi.useFakeTimers();
@@ -467,7 +479,9 @@ describe('createDb', () => {
     const client = createDb({ schema, cacheKey, connectionString });
     const pool = client.getPool();
     // mockImplementation, see the comment on the identical stub above.
-    vi.spyOn(pool, 'end').mockImplementation(() => new Promise<void>(() => {}));
+    vi.spyOn(pool as PromiseEnd, 'end').mockImplementation(
+      () => new Promise<void>(() => {})
+    );
     // totalCount/waitingCount are real pg-pool Pool getters; stub them so the
     // warning's reported numbers can be asserted precisely without needing
     // an actual checked-out client.
@@ -507,7 +521,7 @@ describe('createDb', () => {
     // Simulates the abandoned real pool.end() call settling (badly) only
     // after closeDb() has already given up on it and resolved.
     // mockImplementation, see the comment on the identical stub above.
-    vi.spyOn(pool, 'end').mockImplementation(
+    vi.spyOn(pool as PromiseEnd, 'end').mockImplementation(
       () =>
         new Promise<void>((_resolve, reject) => {
           rejectPoolEnd = reject;
@@ -580,7 +594,7 @@ describe('createDb', () => {
     });
     const pool = client.getPool();
     const poolEndError = new Error('Called end on pool more than once');
-    vi.spyOn(pool, 'end').mockRejectedValue(poolEndError);
+    vi.spyOn(pool as PromiseEnd, 'end').mockRejectedValue(poolEndError);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     vi.useFakeTimers();

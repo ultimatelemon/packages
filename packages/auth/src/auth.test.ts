@@ -5,8 +5,8 @@ vi.mock('openid-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('openid-client')>();
   return {
     ...actual,
-    discovery: vi.fn(
-      async () =>
+    discovery: vi.fn(() =>
+      Promise.resolve(
         new actual.Configuration(
           {
             issuer: 'https://id.example',
@@ -15,6 +15,7 @@ vi.mock('openid-client', async (importOriginal) => {
           'id',
           'secret'
         )
+      )
     ),
     // No default implementation: every test below that reaches this call
     // sets its own resolved/rejected value via
