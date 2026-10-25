@@ -1,0 +1,31 @@
+name: Storybook
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/ui/**', '.github/workflows/storybook.yml']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: storybook
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    uses: ultimatelemon/shared-actions/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image: ghcr.io/ultimatelemon/ui-storybook
+      dockerfile: packages/ui/Dockerfile
+
+  deploy:
+    needs: publish
+    uses: ultimatelemon/shared-actions/.github/workflows/dokploy-deploy.yml@v1
+    with:
+      url: https://ui.ultimatelemon.eu
+    secrets:
+      webhook-url: ${{ secrets.DOKPLOY_STORYBOOK_DEPLOY_URL }}
