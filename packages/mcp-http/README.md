@@ -42,7 +42,7 @@ process.once('SIGTERM', () => {
 | `host`            | `'0.0.0.0'` | `'127.0.0.1'` keeps it local                                                  |
 | `basePath`        | `''`        | Also serve MCP on `<basePath>` and `<basePath>/mcp`, and `<basePath>/healthz` |
 | `health`          | always ok   | Return `false` for a 503 on `/healthz`                                        |
-| `apiKey`          | off         | Require the caller's key; `hint` is added to the 401 message                  |
+| `apiKey`          | off         | Require the caller's key; `hint` is added to the 401, `verify` checks it      |
 | `oauth`           | off         | Let callers sign in with the upstream service; see [OAuth](#oauth)            |
 | `logger`          | silent      | Anything with `error(obj, msg)`, such as pino                                 |
 
@@ -56,6 +56,15 @@ the upstream API, in `X-Api-Key` or as `Authorization: Bearer <key>`
 before building an MCP server. The key reaches `createMcpServer` as
 `apiKey`; it is never logged or stored. Other per-caller settings can travel
 as headers of their own, read from `headers` in the same context.
+
+When the server hands out keys itself, `verify` checks one before any MCP
+work: return `false` and the caller gets a 401 with `error="invalid_token"`.
+
+```ts
+apiKey: {
+  verify: (key) => findUserByToken(key) !== undefined;
+}
+```
 
 This suits public servers where each user brings their own credentials: no
 sessions, no database. In claude.ai, add the connector with

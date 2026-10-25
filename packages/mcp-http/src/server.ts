@@ -30,6 +30,8 @@ export interface RequestContext {
 export interface ApiKeyOptions {
   /** Added to the 401 message, e.g. where to get a key. */
   hint?: string;
+  /** For keys this server issued itself: return false to answer 401 before building a server. */
+  verify?: (key: string) => boolean | Promise<boolean>;
 }
 
 export interface McpHttpOptions {
@@ -248,8 +250,8 @@ export async function startMcpHttpServer(
       return;
     }
     const apiKey = options.apiKey ? (headerKey(req) ?? bearer) : undefined;
+    const hint = options.apiKey?.hint ? ` ${options.apiKey.hint}` : '';
     if (!apiKey) {
-      const hint = options.apiKey?.hint ? ` ${options.apiKey.hint}` : '';
       res.setHeader('www-authenticate', oauth ? oauth.challenge() : 'Bearer');
       jsonRpcError(
         res,
@@ -258,6 +260,11 @@ export async function startMcpHttpServer(
           ? `Missing API key: send it in the X-Api-Key header or as Authorization: Bearer <key>.${hint}`
           : 'Sign in to use this server.'
       );
+      return;
+    }
+    if (options.apiKey?.verify && !(await options.apiKey.verify(apiKey))) {
+      res.setHeader('www-authenticate', 'Bearer error="invalid_token"');
+      jsonRpcError(res, 401, `The API key is not valid.${hint}`);
       return;
     }
     await nodeHandler(

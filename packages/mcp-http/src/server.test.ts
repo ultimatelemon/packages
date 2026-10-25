@@ -180,6 +180,58 @@ describe('startMcpHttpServer - caller API key', () => {
   });
 });
 
+describe('startMcpHttpServer - verified API key', () => {
+  let verified: McpHttpServer;
+  let built = 0;
+
+  beforeAll(async () => {
+    verified = await startMcpHttpServer({
+      createMcpServer: () => {
+        built += 1;
+        return new McpServer({ name: 'verified', version: '1.0.0' });
+      },
+      port: 0,
+      host: '127.0.0.1',
+      apiKey: {
+        hint: 'Ask the operator.',
+        verify: (key) => Promise.resolve(key === 'known')
+      }
+    });
+  });
+
+  afterAll(() => verified.close());
+
+  it('rejects an unknown key with 401 before building a server', async () => {
+    const res = await fetch(verified.url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization: 'Bearer unknown'
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toBe(
+      'Bearer error="invalid_token"'
+    );
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toBe(
+      'The API key is not valid. Ask the operator.'
+    );
+    expect(built).toBe(0);
+  });
+
+  it('serves a known key', async () => {
+    const client = await connect(verified.url, {
+      authorization: 'Bearer known'
+    });
+    await client.listTools();
+    expect(built).toBeGreaterThan(0);
+    await client.close();
+  });
+});
+
 // PKG-10: close() used to call closeIdleConnections() exactly once,
 // synchronously, right when close() was invoked. A keep-alive connection
 // that was still processing a request at that exact moment - and only
