@@ -30,11 +30,22 @@ function key(): Buffer {
   return key;
 }
 
-export function encrypt(plaintext: string): string {
+export interface SealOptions {
+  /**
+   * Bound into the tag but not stored: decrypting needs the same value, so a
+   * sealed value copied to another row (another user's id) no longer opens.
+   */
+  context?: string;
+}
+
+export function encrypt(plaintext: string, options: SealOptions = {}): string {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, key(), iv, {
     authTagLength: TAG_BYTES
   });
+  if (options.context !== undefined) {
+    cipher.setAAD(Buffer.from(options.context, 'utf8'));
+  }
   const data = Buffer.concat([
     cipher.update(plaintext, 'utf8'),
     cipher.final()
@@ -44,7 +55,7 @@ export function encrypt(plaintext: string): string {
 }
 
 // Throws when the value was tampered with or sealed under another key.
-export function decrypt(sealed: string): string {
+export function decrypt(sealed: string, options: SealOptions = {}): string {
   if (!isEncrypted(sealed)) throw new Error('Not an encrypted value');
   const [, iv, tag, data] = sealed.split('.').map(decode);
   if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) {
@@ -54,6 +65,9 @@ export function decrypt(sealed: string): string {
   const decipher = createDecipheriv(ALGORITHM, key(), iv, {
     authTagLength: TAG_BYTES
   });
+  if (options.context !== undefined) {
+    decipher.setAAD(Buffer.from(options.context, 'utf8'));
+  }
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(data), decipher.final()]).toString(
     'utf8'

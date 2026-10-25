@@ -77,6 +77,20 @@ describe('encrypt / decrypt', () => {
   });
 });
 
+describe('context', () => {
+  it('only opens with the context it was sealed with', () => {
+    const sealed = encrypt('secret', { context: 'user1:account1' });
+    expect(decrypt(sealed, { context: 'user1:account1' })).toBe('secret');
+    expect(() => decrypt(sealed, { context: 'user2:account9' })).toThrow();
+    expect(() => decrypt(sealed)).toThrow();
+  });
+
+  it('is not needed for a value sealed without one', () => {
+    expect(() => decrypt(encrypt('secret'), { context: 'x' })).toThrow();
+    expect(decrypt(encrypt('secret'))).toBe('secret');
+  });
+});
+
 describe('ENCRYPTION_KEY', () => {
   it('is required', () => {
     delete process.env.ENCRYPTION_KEY;
