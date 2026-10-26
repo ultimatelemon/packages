@@ -38,6 +38,9 @@ export interface LoginStart {
 
 export interface LoginResult {
   session: Session;
+  // The id_token claims, for a one-off decision at login such as mapping
+  // Zitadel project roles. Never stored in the session.
+  claims: Record<string, unknown>;
   returnTo: string;
   cookies: CookieToSet[];
 }
@@ -349,6 +352,7 @@ export function createAuth(options: AuthConfig | (() => AuthConfig)): Auth {
 
     return {
       session,
+      claims: { ...claims },
       returnTo: flow.returnTo,
       cookies: [
         cookie(flowCookieName(), '', 0),
