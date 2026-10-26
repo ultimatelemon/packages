@@ -340,6 +340,34 @@ describe('createAuth - exchange_failed scope', () => {
     expect(client.authorizationCodeGrant).not.toHaveBeenCalled();
   });
 
+  it('returns the id_token claims next to the session, without putting them in it', async () => {
+    const instance = freshAuth();
+    const roles = { viewer: { '1': 'zitadel.example' } };
+    vi.mocked(client.authorizationCodeGrant).mockResolvedValueOnce({
+      access_token: 'at',
+      token_type: 'bearer',
+      claims: () => ({
+        iss: 'https://id.example',
+        sub: 'u1',
+        aud: 'id',
+        iat: 0,
+        exp: 0,
+        email: 'a@b.c',
+        'urn:zitadel:iam:org:project:roles': roles
+      })
+    } as unknown as Awaited<ReturnType<typeof client.authorizationCodeGrant>>);
+
+    const result = await instance.finishLogin(
+      'https://app.example/api/auth/callback?code=x',
+      validFlowCookie
+    );
+
+    expect(result.claims['urn:zitadel:iam:org:project:roles']).toEqual(roles);
+    expect(result.session).not.toHaveProperty(
+      'urn:zitadel:iam:org:project:roles'
+    );
+  });
+
   it('still wraps a genuine client.authorizationCodeGrant() failure as AuthError exchange_failed with the original error as cause', async () => {
     const instance = freshAuth();
     const underlying = new Error('token endpoint rejected the code');

@@ -133,6 +133,21 @@ user id and `authTime` (seconds) is when the user last entered credentials.
 Permissions do not belong in it: read them per request, so revoking access
 works immediately rather than when the token expires.
 
+### Claims at login
+
+`finishLogin` also returns `claims`: the raw id_token claims. Use them for a
+decision made once at login, such as mapping Zitadel project roles onto
+another system's roles. They are not part of the session. Zitadel only puts
+`urn:zitadel:iam:org:project:roles` in the id_token when the project asserts
+roles on authentication and the app has "User roles inside ID Token" on.
+
+```ts
+const { claims } = await auth.finishLogin(request.url, flowCookie);
+const roles = Object.keys(
+  (claims['urn:zitadel:iam:org:project:roles'] as object | undefined) ?? {}
+);
+```
+
 ### Sensitive actions
 
 Single sign-on can log a user in without asking for anything. Before showing
