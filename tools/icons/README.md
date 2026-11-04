@@ -3,16 +3,18 @@
 Builds private npm packages from a Font Awesome Pro web download, one package
 per style, so a project installs only the styles it uses.
 
-| Package                                   | Style           |
-| ----------------------------------------- | --------------- |
-| `@ultimatelemon-eu/icons-solid`           | classic solid   |
-| `@ultimatelemon-eu/icons-regular`         | classic regular |
-| `@ultimatelemon-eu/icons-brands`          | brands          |
-| `@ultimatelemon-eu/icons-sharp-solid`     | sharp solid     |
-| `@ultimatelemon-eu/icons-sharp-regular`   | sharp regular   |
-| `@ultimatelemon-eu/icons-duotone-solid`   | duotone solid   |
-| `@ultimatelemon-eu/icons-duotone-regular` | duotone regular |
-| `@ultimatelemon-eu/icons-pixel-regular`   | pixel regular   |
+| Package                                     | Style             |
+| ------------------------------------------- | ----------------- |
+| `@ultimatelemon-eu/icons-solid`             | classic solid     |
+| `@ultimatelemon-eu/icons-regular`           | classic regular   |
+| `@ultimatelemon-eu/icons-brands`            | brands            |
+| `@ultimatelemon-eu/icons-sharp-solid`       | sharp solid       |
+| `@ultimatelemon-eu/icons-sharp-regular`     | sharp regular     |
+| `@ultimatelemon-eu/icons-duotone-solid`     | duotone solid     |
+| `@ultimatelemon-eu/icons-duotone-regular`   | duotone regular   |
+| `@ultimatelemon-eu/icons-pixel-regular`     | pixel regular     |
+| `@ultimatelemon-eu/icons-light`             | classic light     |
+| `@ultimatelemon-eu/icons-jelly-duo-regular` | jelly duo regular |
 
 The package version is the Font Awesome version. Add a style in `STYLES` in
 `generate.ts`.

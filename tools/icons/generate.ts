@@ -54,6 +54,13 @@ const STYLES: Style[] = [
     family: 'pixel',
     style: 'regular',
     prefix: 'fapr'
+  },
+  { name: 'icons-light', family: 'classic', style: 'light', prefix: 'fal' },
+  {
+    name: 'icons-jelly-duo-regular',
+    family: 'jelly-duo',
+    style: 'regular',
+    prefix: 'fajdr'
   }
 ];
 
