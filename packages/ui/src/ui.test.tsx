@@ -1,6 +1,18 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { Badge, Button, Card, CardTitle, Input, Label, cn } from './index.js';
+import {
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  Label,
+  cn
+} from './index.js';
 
 describe('cn', () => {
   it('lets a later class win over a conflicting one', () => {
@@ -57,5 +69,21 @@ describe('the other components', () => {
     for (const slot of ['card', 'card-title', 'label', 'input', 'badge']) {
       expect(html).toContain(`data-slot="${slot}"`);
     }
+  });
+});
+
+describe('DropdownMenu', () => {
+  it('renders a trigger that announces the menu', () => {
+    const html = renderToStaticMarkup(
+      <DropdownMenu>
+        <DropdownMenuTrigger>Account</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem>Uitloggen</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+    expect(html).toContain('data-slot="dropdown-menu-trigger"');
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain('data-state="closed"');
   });
 });

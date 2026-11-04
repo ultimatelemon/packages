@@ -29,8 +29,10 @@ icons. It ships in the package, so a project's `CLAUDE.md` can point at
 ## Components
 
 `Button`, `Input`, `Label`, `Card` (with `CardHeader`, `CardTitle`,
-`CardDescription`, `CardAction`, `CardContent`, `CardFooter`) and `Badge`, plus
-`cn` to merge class names.
+`CardDescription`, `CardAction`, `CardContent`, `CardFooter`), `Badge` and
+`DropdownMenu` (Radix, with items, checkbox and radio items, labels, shortcuts
+and submenus; it animates in from the side it opens on), plus `cn` to merge
+class names.
 
 ## Icons
 

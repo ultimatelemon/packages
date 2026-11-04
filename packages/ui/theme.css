@@ -94,6 +94,27 @@
     sans-serif;
 }
 
+/* Popovers grow from their trigger; --popover-x/y nudge them in from the side
+   they open on. */
+@theme {
+  --animate-popover-in: popover-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-popover-out: popover-out 100ms ease-in forwards;
+
+  @keyframes popover-in {
+    from {
+      opacity: 0;
+      transform: translate(var(--popover-x, 0), var(--popover-y, 0)) scale(0.96);
+    }
+  }
+
+  @keyframes popover-out {
+    to {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);

@@ -1,6 +1,6 @@
 {
   "name": "@ultimatelemon-eu/ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The UltimateLemon theme and shadcn-style React components on semantic CSS variables, for Tailwind 4.",
   "license": "MIT",
   "repository": {
