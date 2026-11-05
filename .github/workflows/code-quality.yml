@@ -4,15 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions: {}
 
 concurrency:
-  group: code-quality-${{ github.ref }}
+  group: code-quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# A public repository stays on v1 (GitHub-hosted runners), whose default is
+# still Node 24.
 jobs:
   quality:
     uses: ultimatelemon/shared-actions/.github/workflows/node-quality.yml@v1
     permissions:
       contents: read
+    with:
+      node-version: '26'

@@ -1,4 +1,4 @@
-import { config } from './packages/eslint-config/base.js';
+import { config } from '@ultimatelemon-eu/eslint-config/base';
 
 // The packages' own tsconfig.json leaves out the tests, so lint against the
 // test configs, which cover both.

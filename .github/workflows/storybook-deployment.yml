@@ -1,19 +1,28 @@
-name: Storybook
+name: Storybook Deployment
 
 on:
   push:
     branches: [main]
-    paths: ['packages/ui/**', '.github/workflows/storybook.yml']
+    paths:
+      - 'packages/ui/**'
+      - 'package-lock.json'
+      - '.github/workflows/storybook-deployment.yml'
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: storybook
+  group: storybook-deployment
   cancel-in-progress: true
 
 jobs:
+  quality:
+    uses: ./.github/workflows/code-quality.yml
+    permissions:
+      contents: read
+
   publish:
+    needs: quality
     uses: ultimatelemon/shared-actions/.github/workflows/docker-publish.yml@v1
     permissions:
       contents: read
@@ -23,6 +32,7 @@ jobs:
       dockerfile: packages/ui/Dockerfile
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: publish
     permissions:
       contents: read
