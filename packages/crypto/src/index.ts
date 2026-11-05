@@ -2,7 +2,8 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
-  randomBytes
+  randomBytes,
+  timingSafeEqual
 } from 'node:crypto';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -178,6 +179,14 @@ export function randomToken(bytes = 32): string {
 
 export function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+// Hashing first gives both sides the same length, so neither the comparison
+// nor an early length check leaks how long the expected value is.
+export function safeEqual(a: string, b: string): boolean {
+  const left = createHash('sha256').update(a).digest();
+  const right = createHash('sha256').update(b).digest();
+  return timingSafeEqual(left, right);
 }
 
 function encode(part: string | Buffer): string {
