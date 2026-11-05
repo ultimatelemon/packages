@@ -43,7 +43,7 @@ needs an icon takes it as a child or prop.
 ## Storybook
 
 Live at <https://ui.ultimatelemon.eu>, rebuilt on every push to `packages/ui/`
-(`.github/workflows/storybook.yml`). Locally:
+(`.github/workflows/storybook-deployment.yml`). Locally:
 
 ```bash
 npm run storybook --workspace @ultimatelemon-eu/ui
