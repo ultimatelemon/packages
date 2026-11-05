@@ -73,6 +73,7 @@ curl -X POST "$INFISICAL_KMS_URL/api/v1/kms/keys/$INFISICAL_KMS_KEY_ID/encrypt" 
 | `isEncrypted(value)`               | `boolean` | Type guard for the `v1.` format                          |
 | `randomToken(bytes=32)`            | `string`  | base64url, for invite links, CSRF, state                 |
 | `sha256Hex(value)`                 | `string`  | Store a token's hash, not the token                      |
+| `safeEqual(a, b)`                  | `boolean` | Constant-time compare for tokens and API keys            |
 
 `decrypt` also reads the same format written with standard base64, which is
 what Cellar stored before this package.

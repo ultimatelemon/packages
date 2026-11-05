@@ -5,6 +5,7 @@ import {
   encrypt,
   isEncrypted,
   randomToken,
+  safeEqual,
   sha256Hex
 } from './index.js';
 
@@ -131,5 +132,20 @@ describe('sha256Hex', () => {
     expect(sha256Hex('abc')).toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
     );
+  });
+});
+
+describe('safeEqual', () => {
+  it('is true for identical strings', () => {
+    expect(safeEqual('tok_abc', 'tok_abc')).toBe(true);
+  });
+
+  it('is false for different strings of the same length', () => {
+    expect(safeEqual('tok_abc', 'tok_abd')).toBe(false);
+  });
+
+  it('is false for different lengths without throwing', () => {
+    expect(safeEqual('short', 'a much longer token')).toBe(false);
+    expect(safeEqual('', 'x')).toBe(false);
   });
 });
