@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogTitle,
+  AlertDialogTrigger,
   Badge,
   Button,
   Card,
@@ -11,6 +15,7 @@ import {
   DropdownMenuTrigger,
   Input,
   Label,
+  Toaster,
   cn
 } from './index.js';
 
@@ -85,5 +90,28 @@ describe('DropdownMenu', () => {
     expect(html).toContain('data-slot="dropdown-menu-trigger"');
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).toContain('data-state="closed"');
+  });
+});
+
+describe('AlertDialog', () => {
+  it('renders a closed trigger and keeps the dialog out of the page', () => {
+    const html = renderToStaticMarkup(
+      <AlertDialog>
+        <AlertDialogTrigger>Verwijderen</AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogTitle>Weet je het zeker?</AlertDialogTitle>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+    expect(html).toContain('data-slot="alert-dialog-trigger"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('Weet je het zeker?');
+  });
+});
+
+describe('Toaster', () => {
+  it('renders the toast region', () => {
+    const html = renderToStaticMarkup(<Toaster />);
+    expect(html).toContain('aria-label="Notifications');
   });
 });
