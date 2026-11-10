@@ -44,6 +44,7 @@ process.once('SIGTERM', () => {
 | `health`          | always ok   | Return `false` for a 503 on `/healthz`                                        |
 | `apiKey`          | off         | Require the caller's key; `hint` is added to the 401, `verify` checks it      |
 | `oauth`           | off         | Let callers sign in with the upstream service; see [OAuth](#oauth)            |
+| `pages`           | none        | Extra pages under `<basePath>/`; see [Pages](#pages)                          |
 | `logger`          | silent      | Anything with `error(obj, msg)`, such as pino                                 |
 
 It returns `{ url, port, close() }`.
@@ -127,6 +128,24 @@ await startMcpHttpServer({
 - Nothing can be revoked server-side: a user revokes the app at the upstream
   provider, and rotating `ENCRYPTION_KEY` signs everyone out. A code can be
   redeemed once per process.
+
+## Pages
+
+`pages` serves anything else under `<basePath>/`, such as a form the caller
+opens in a browser. It gets a web `Request` (body capped at 64 KiB) and
+returns a `Response`, or `undefined` for the usual 404. MCP, `/healthz` and
+the OAuth routes are matched first and never reach it.
+
+`htmlPage(title, body)` wraps markup in the layout of the sign-in pages, and
+`htmlResponse(html, status)` sends it with `no-store` and a CSP that allows no
+scripts and no framing. Escape anything you insert with `escapeHtml`.
+
+```ts
+pages: (request) => {
+  if (new URL(request.url).pathname !== '/example/hello') return undefined;
+  return htmlResponse(htmlPage('Hello', '<h1>Hello</h1>'), 200);
+};
+```
 
 ## Why stateless
 

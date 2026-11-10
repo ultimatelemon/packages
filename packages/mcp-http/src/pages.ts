@@ -16,6 +16,11 @@ const STYLE = `
     border: 1px solid #dcdcd6; border-radius: .5rem; background: #fff; cursor: pointer;
   }
   label:has(input:checked) { border-color: #1a1a18; }
+  input[type=password], input[type=text], input[type=email] {
+    box-sizing: border-box; width: 100%; padding: .75rem 1rem; font: inherit; color: inherit;
+    border: 1px solid #dcdcd6; border-radius: .5rem; background: #fff;
+  }
+  a { color: inherit; }
   .hint { display: block; color: #5c5c56; font-size: .875rem; }
   button {
     width: 100%; padding: .875rem 1rem; font: inherit; font-weight: 600; cursor: pointer;
@@ -24,7 +29,7 @@ const STYLE = `
   @media (prefers-color-scheme: dark) {
     body { background: #171715; color: #f2f2ef; }
     p, .hint, legend small { color: #a3a39c; }
-    label { background: #201f1d; border-color: #35342f; }
+    label, input[type=password], input[type=text], input[type=email] { background: #201f1d; border-color: #35342f; }
     label:has(input:checked) { border-color: #f2f2ef; }
     button { background: #f2f2ef; color: #171715; }
   }
@@ -61,7 +66,8 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function page(title: string, body: string): string {
+/** A full HTML document in the style of the sign-in pages; `body` is inserted as is. */
+export function htmlPage(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -92,7 +98,7 @@ export function htmlResponse(
 }
 
 export function errorPage(title: string, detail: string): string {
-  return page(
+  return htmlPage(
     title,
     `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p>`
   );
@@ -121,7 +127,7 @@ export function settingsPage(
   pending: string
 ): string {
   const intro = form.intro ? `<p>${escapeHtml(form.intro)}</p>` : '';
-  return page(
+  return htmlPage(
     form.title,
     `<h1>${escapeHtml(form.title)}</h1>${intro}
      <form method="post" action="${escapeHtml(action)}">

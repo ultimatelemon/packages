@@ -12,6 +12,9 @@ export {
   type OAuthOptions
 } from './oauth.js';
 export {
+  escapeHtml,
+  htmlPage,
+  htmlResponse,
   type SettingsField,
   type SettingsForm,
   type SettingsOption

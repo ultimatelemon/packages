@@ -48,6 +48,10 @@ export interface McpHttpOptions {
   apiKey?: ApiKeyOptions;
   /** Sign in with the upstream service instead of pasting a key. Needs `ENCRYPTION_KEY`. */
   oauth?: OAuthOptions;
+  /** Extra pages under the base path, such as a form. Return undefined for a 404. Bodies are capped at 64 KiB. */
+  pages?: (
+    request: Request
+  ) => Response | undefined | Promise<Response | undefined>;
   logger?: Logger;
 }
 
@@ -107,14 +111,14 @@ function bearerFrom(req: IncomingMessage): string | undefined {
   return bearer?.[1]?.trim() || undefined;
 }
 
-const MAX_OAUTH_BODY_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
 
 async function toRequest(req: IncomingMessage): Promise<Request> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > MAX_OAUTH_BODY_BYTES) throw new Error('Request body too large');
+    if (size > MAX_BODY_BYTES) throw new Error('Request body too large');
     chunks.push(chunk);
   }
   const headers = new Headers();
@@ -289,6 +293,13 @@ export async function startMcpHttpServer(
     if (oauth?.owns(path)) {
       await sendResponse(res, await oauth.handle(await toRequest(req)));
       return;
+    }
+    if (options.pages && (!base || path.startsWith(`${base}/`))) {
+      const response = await options.pages(await toRequest(req));
+      if (response) {
+        await sendResponse(res, response);
+        return;
+      }
     }
     sendJson(res, 404, { error: 'Not found' });
   }
