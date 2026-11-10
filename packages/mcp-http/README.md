@@ -113,7 +113,9 @@ await startMcpHttpServer({
 
 - Register `<publicUrl><basePath>/oauth/callback` as the redirect URI at the
   upstream provider.
-- Clients register dynamically (RFC 7591) and must use PKCE (S256).
+- Clients identify themselves with a Client ID Metadata Document (CIMD) or
+  register dynamically (RFC 7591), and must use PKCE (S256). See
+  [Clients](#clients).
 - `settings` is optional: a form shown once after the upstream sign-in, with
   radio or checkbox fields. Submitted values are checked against the options,
   and the answers reach `createMcpServer` as `oauth.settings` on every request.
@@ -128,6 +130,106 @@ await startMcpHttpServer({
 - Nothing can be revoked server-side: a user revokes the app at the upstream
   provider, and rotating `ENCRYPTION_KEY` signs everyone out. A code can be
   redeemed once per process.
+
+### Clients
+
+claude.ai and Claude Code use a Client ID Metadata Document: the `client_id`
+is the URL of a JSON document that lists the client's redirect URIs, such as
+`https://claude.ai/oauth/mcp-oauth-client-metadata`. In claude.ai that is the
+"Use Claude's published identity" option, which it picks by itself once the
+metadata says `client_id_metadata_document_supported`.
+
+| Option             | Default                           | Does                                                      |
+| ------------------ | --------------------------------- | --------------------------------------------------------- |
+| `clientIdMetadata` | `{ trustedHosts: ['claude.ai'] }` | Hosts whose documents are fetched; `false` turns CIMD off |
+| `registration`     | `true`                            | Dynamic client registration on `<basePath>/register`      |
+
+- Only documents on `trustedHosts` are fetched, so a `client_id` cannot make
+  the server request an arbitrary URL. The `client_id` must be the canonical
+  https URL with a path; redirects are not followed, the fetch times out after
+  5 seconds and documents over 16 KiB are refused. A document must name the
+  same `client_id`, list its `redirect_uris` and be a public client
+  (`token_endpoint_auth_method` `none`). Documents are cached for 5 minutes.
+- Anyone can register through DCR with any redirect URI, and the upstream
+  sign-in may pass without a prompt when the user already has a session there.
+  For a server with private data, set `registration: false` and accept only
+  the clients on `trustedHosts`.
+
+### OpenID Connect upstream
+
+`oidcUpstream` signs users in with an OpenID Connect provider such as Zitadel,
+with PKCE toward the provider. Whoever signed in reaches `createMcpServer` as
+`oauth.subject` (the `sub` claim).
+
+```ts
+import { oidcUpstream } from '@ultimatelemon-eu/mcp-http';
+
+const upstream = oidcUpstream({
+  issuer: 'https://id.example.com',
+  clientId: process.env.OIDC_CLIENT_ID ?? '',
+  clientSecret: process.env.OIDC_CLIENT_SECRET ?? '',
+  scopes: ['openid', 'offline_access']
+});
+```
+
+| Option                    | Default              | Does                                                        |
+| ------------------------- | -------------------- | ----------------------------------------------------------- |
+| `issuer`                  | required             | https only; discovered once, retried after a failure        |
+| `clientId`                | required             | A confidential client at the provider                       |
+| `clientSecret`            | required             |                                                             |
+| `scopes`                  | `['openid']`         | Add `offline_access` for an upstream refresh token          |
+| `tokenEndpointAuthMethod` | `client_secret_post` | Or `client_secret_basic`; must match the provider's setting |
+
+- The id_token comes straight from the token endpoint over TLS, so its
+  signature is not checked (OIDC Core 3.1.3.7); its issuer, audience,
+  authorized party, expiry and subject are.
+- A refresh renews the upstream token when it is about to expire, which is
+  when a user who lost access at the provider is turned away. Without
+  `offline_access` (in Zitadel: the Refresh Token grant on the app), the user
+  signs in again once the upstream token expires. A refresh that comes back
+  for another subject is refused.
+- `oauth2Upstream` takes `pkce: true` for a plain OAuth provider that supports
+  PKCE.
+
+### Other frameworks
+
+`@ultimatelemon-eu/mcp-http/oauth` exports `createOAuthHandler` without the
+Node HTTP server, for a framework that routes requests itself, such as a
+Next.js route handler. It takes web `Request`s and returns `Response`s.
+
+```ts
+// src/lib/mcp-oauth.ts
+import {
+  createOAuthHandler,
+  oidcUpstream
+} from '@ultimatelemon-eu/mcp-http/oauth';
+
+let handler: ReturnType<typeof createOAuthHandler> | undefined;
+
+// Lazily: creating it checks ENCRYPTION_KEY, which `next build` does not have.
+export function mcpOAuth() {
+  handler ??= createOAuthHandler(
+    {
+      publicUrl: process.env.APP_URL ?? '',
+      name: 'Example',
+      upstream: oidcUpstream({/* ... */}),
+      registration: false
+    },
+    '/api/mcp'
+  );
+  return handler;
+}
+```
+
+- Send every request for a path that `owns(path)` accepts to `handle`: the
+  routes under `<basePath>/` (`authorize`, `token`, `oauth/callback`,
+  `oauth/settings`, `.well-known/...`) and `/.well-known/oauth-protected-resource<basePath>`,
+  `/.well-known/oauth-authorization-server<basePath>` and
+  `/.well-known/openid-configuration<basePath>`.
+- On the MCP endpoint itself, read the bearer token with `authenticate(token)`.
+  It returns the grant, or `undefined`: answer 401 with
+  `WWW-Authenticate: <challenge()>`, or `challenge('invalid_token')` when a
+  token was sent.
 
 ## Pages
 
