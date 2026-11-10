@@ -1,5 +1,12 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { decrypt, encrypt, isEncrypted } from '@ultimatelemon-eu/crypto';
+import {
+  createClientResolver,
+  DEFAULT_TRUSTED_HOSTS,
+  isAllowedRedirectUri,
+  isClientIdUrl,
+  type ClientIdMetadataOptions
+} from './client-metadata.js';
 import {
   errorPage,
   htmlResponse,
@@ -16,12 +23,23 @@ export interface OAuthOptions {
   upstream: OAuthUpstream;
   /** Asked once after the upstream sign-in; the answers travel inside the issued tokens. */
   settings?: (accessToken: string) => Promise<SettingsForm | undefined>;
+  /**
+   * Accept a `client_id` that is the URL of its metadata document (CIMD), from
+   * these hosts only. Default `{ trustedHosts: ['claude.ai'] }`; `false` turns it off.
+   */
+  clientIdMetadata?: ClientIdMetadataOptions | false;
+  /** Dynamic client registration (RFC 7591). Default true. */
+  registration?: boolean;
+  /** Used to fetch client metadata documents. */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface OAuthGrant {
   /** The upstream access token. */
   accessToken: string;
   settings: Record<string, string>;
+  /** Who signed in, when the upstream names them (the OIDC `sub` with `oidcUpstream`). */
+  subject?: string;
 }
 
 export interface OAuthHandler {
@@ -54,6 +72,8 @@ interface ClientSeal {
 }
 interface StateSeal extends Flow {
   t: 'state';
+  /** PKCE verifier toward the upstream. */
+  v: string;
 }
 interface PendingSeal extends Flow {
   t: 'pending';
@@ -68,6 +88,7 @@ interface AccessSeal {
   t: 'access';
   u: string;
   a: Record<string, string>;
+  sub?: string;
 }
 interface RefreshSeal {
   t: 'refresh';
@@ -138,17 +159,6 @@ function readCookie(request: Request, name: string): string | undefined {
 
 const LOOPBACK = ['127.0.0.1', '[::1]', 'localhost'];
 
-function isAllowedRedirectUri(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.hash) return false;
-    if (url.protocol === 'https:') return true;
-    return url.protocol === 'http:' && LOOPBACK.includes(url.hostname);
-  } catch {
-    return false;
-  }
-}
-
 // Exact match, except that a loopback http uri may use any port (RFC 8252 7.3).
 function redirectUriMatches(registered: string, presented: string): boolean {
   if (registered === presented) return true;
@@ -206,20 +216,38 @@ function readSettings(
   return settings;
 }
 
+/**
+ * The authorization server on its own, for a framework that routes requests
+ * itself: hand it every request for a path `owns()` accepts. `basePath` is
+ * where the MCP endpoint lives, e.g. `/api/mcp`; the OAuth paths sit under it.
+ */
 export function createOAuthHandler(
   options: OAuthOptions,
-  basePath: string
+  basePathOption = ''
 ): OAuthHandler {
+  const trimmedBase = basePathOption.replace(/\/+$/, '');
+  const basePath =
+    trimmedBase && !trimmedBase.startsWith('/')
+      ? `/${trimmedBase}`
+      : trimmedBase;
   // Fails at startup rather than at the first sign-in when ENCRYPTION_KEY is missing or malformed.
   decrypt(encrypt('check'));
 
   const origin = options.publicUrl.replace(/\/+$/, '');
   const issuer = `${origin}${basePath}`;
   const { seal, open } = sealer(issuer);
+  const registration = options.registration ?? true;
+  const resolveClientUrl =
+    options.clientIdMetadata === false
+      ? undefined
+      : createClientResolver(
+          options.clientIdMetadata ?? { trustedHosts: DEFAULT_TRUSTED_HOSTS },
+          options.fetch ?? globalThis.fetch
+        );
   const resourceMetadataUrl = `${issuer}/.well-known/oauth-protected-resource`;
   const callbackUri = `${issuer}/oauth/callback`;
   const paths = {
-    register: `${basePath}/register`,
+    ...(registration ? { register: `${basePath}/register` } : {}),
     authorize: `${basePath}/authorize`,
     token: `${basePath}/token`,
     callback: `${basePath}/oauth/callback`,
@@ -266,7 +294,12 @@ export function createOAuthHandler(
       issuer,
       authorization_endpoint: `${origin}${paths.authorize}`,
       token_endpoint: `${origin}${paths.token}`,
-      registration_endpoint: `${origin}${paths.register}`,
+      ...(paths.register
+        ? { registration_endpoint: `${origin}${paths.register}` }
+        : {}),
+      ...(resolveClientUrl
+        ? { client_id_metadata_document_supported: true }
+        : {}),
       response_types_supported: ['code'],
       response_modes_supported: ['query'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
@@ -324,25 +357,39 @@ export function createOAuthHandler(
     return redirect(url.toString());
   }
 
+  /** The redirect uris of a client: from its metadata document, or sealed in its registration. */
+  async function redirectUrisOf(
+    clientId: string | null
+  ): Promise<string[] | string> {
+    if (clientId && resolveClientUrl && isClientIdUrl(clientId)) {
+      const resolved = await resolveClientUrl(clientId);
+      return resolved.ok ? resolved.client.redirectUris : resolved.reason;
+    }
+    const client = registration ? open(clientId, 'client') : undefined;
+    return client
+      ? client.r
+      : 'This client is not registered here. Remove the connector and add it again.';
+  }
+
   // Until the client and redirect uri check out, errors render here: redirecting
   // to an unverified uri would make this an open redirector.
-  function authorize(url: URL): Response {
+  async function authorize(url: URL): Promise<Response> {
     const params = url.searchParams;
     const clientId = params.get('client_id');
     const redirectUri = params.get('redirect_uri');
-    const client = open(clientId, 'client');
-    if (!clientId || !client) {
+    const registered = await redirectUrisOf(clientId);
+    if (!clientId || typeof registered === 'string') {
       return htmlResponse(
         errorPage(
           'Unknown client',
-          'This client is not registered here. Remove the connector and add it again.'
+          typeof registered === 'string' ? registered : 'No client_id was sent.'
         ),
         400
       );
     }
     if (
       !redirectUri ||
-      !client.r.some((registered) =>
+      !registered.some((registered) =>
         redirectUriMatches(registered, redirectUri)
       )
     ) {
@@ -375,16 +422,32 @@ export function createOAuthHandler(
       );
     }
 
+    const upstreamVerifier = randomBytes(32).toString('base64url');
     const sealed = seal(
-      { t: 'state', c: clientId, p: challenge, ...flow },
+      { t: 'state', c: clientId, p: challenge, v: upstreamVerifier, ...flow },
       STATE_TTL_MS
     );
+    let upstreamUrl: string;
+    try {
+      upstreamUrl = await options.upstream.authorizeUrl({
+        redirectUri: callbackUri,
+        state: sealed,
+        codeChallenge: createHash('sha256')
+          .update(upstreamVerifier)
+          .digest('base64url')
+      });
+    } catch (error) {
+      return htmlResponse(
+        errorPage(
+          `Could not reach ${options.name}`,
+          error instanceof Error ? error.message : String(error)
+        ),
+        502
+      );
+    }
     // The cookie covers an upstream that does not echo `state` back.
     return redirect(
-      options.upstream.authorizeUrl({
-        redirectUri: callbackUri,
-        state: sealed
-      }),
+      upstreamUrl,
       `${COOKIE}=${sealed}; Path=${basePath}/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=${String(STATE_TTL_MS / 1000)}`
     );
   }
@@ -467,7 +530,8 @@ export function createOAuthHandler(
     try {
       const tokens = await options.upstream.exchangeCode({
         code,
-        redirectUri: callbackUri
+        redirectUri: callbackUri,
+        codeVerifier: state.v
       });
       return await askSettings(state, tokens);
     } catch (error) {
@@ -531,7 +595,12 @@ export function createOAuthHandler(
           );
     return json({
       access_token: seal(
-        { t: 'access', u: tokens.accessToken, a: settings },
+        {
+          t: 'access',
+          u: tokens.accessToken,
+          a: settings,
+          ...(tokens.subject !== undefined ? { sub: tokens.subject } : {})
+        },
         ttl
       ),
       token_type: 'Bearer',
@@ -601,9 +670,22 @@ export function createOAuthHandler(
       }
       try {
         const renewed = await options.upstream.refresh(tokens.refreshToken);
+        if (
+          renewed.subject !== undefined &&
+          tokens.subject !== undefined &&
+          renewed.subject !== tokens.subject
+        ) {
+          return oauthError(
+            'invalid_grant',
+            `The ${options.name} sign-in belongs to someone else now. Sign in again.`
+          );
+        }
         tokens = {
           ...renewed,
-          refreshToken: renewed.refreshToken ?? tokens.refreshToken
+          refreshToken: renewed.refreshToken ?? tokens.refreshToken,
+          ...(tokens.subject !== undefined || renewed.subject !== undefined
+            ? { subject: renewed.subject ?? tokens.subject }
+            : {})
         };
       } catch (error) {
         return oauthError(
@@ -654,7 +736,9 @@ export function createOAuthHandler(
     if (method === 'GET' && serverPaths.has(path)) {
       return json(authorizationServerMetadata());
     }
-    if (method === 'POST' && path === paths.register) return register(request);
+    if (method === 'POST' && paths.register && path === paths.register) {
+      return register(request);
+    }
     if (method === 'GET' && path === paths.authorize) return authorize(url);
     if (method === 'GET' && path === paths.callback) {
       return callback(request, url);
@@ -669,7 +753,12 @@ export function createOAuthHandler(
     handle,
     authenticate(token) {
       const access = open(token, 'access');
-      return access ? { accessToken: access.u, settings: access.a } : undefined;
+      if (!access) return undefined;
+      return {
+        accessToken: access.u,
+        settings: access.a,
+        ...(access.sub !== undefined ? { subject: access.sub } : {})
+      };
     },
     challenge(error) {
       const parts = [`resource_metadata="${resourceMetadataUrl}"`];

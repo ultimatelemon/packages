@@ -24,7 +24,11 @@ export interface RequestContext {
   /** Headers of the HTTP request, for per-caller settings beyond the key. */
   headers: Headers;
   /** Set when the caller signed in through `oauth`; `apiKey` then holds the upstream token. */
-  oauth?: { settings: Record<string, string> };
+  oauth?: {
+    settings: Record<string, string>;
+    /** Who signed in, when the upstream names them (`oidcUpstream` does). */
+    subject?: string;
+  };
 }
 
 export interface ApiKeyOptions {
@@ -202,7 +206,10 @@ export async function startMcpHttpServer(
         ...(authInfo?.extra?.['settings']
           ? {
               oauth: {
-                settings: authInfo.extra['settings'] as Record<string, string>
+                settings: authInfo.extra['settings'] as Record<string, string>,
+                ...(typeof authInfo.extra['subject'] === 'string'
+                  ? { subject: authInfo.extra['subject'] }
+                  : {})
               }
             }
           : {}),
@@ -246,7 +253,10 @@ export async function startMcpHttpServer(
             token: grant.accessToken,
             clientId: 'oauth',
             scopes: [],
-            extra: { settings: grant.settings }
+            extra: {
+              settings: grant.settings,
+              ...(grant.subject !== undefined ? { subject: grant.subject } : {})
+            }
           }
         }),
         res

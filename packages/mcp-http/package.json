@@ -1,6 +1,6 @@
 {
   "name": "@ultimatelemon-eu/mcp-http",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Run an MCP server over stateless Streamable HTTP: /mcp, /healthz, a base path for proxies, the caller's own API key or a stateless OAuth sign-in, and errors that never leak a stack trace.",
   "license": "MIT",
   "repository": {
@@ -15,6 +15,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./oauth": {
+      "types": "./dist/oauth-entry.d.ts",
+      "default": "./dist/oauth-entry.js"
     }
   },
   "files": [
