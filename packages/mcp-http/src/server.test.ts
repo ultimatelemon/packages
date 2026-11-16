@@ -6,6 +6,8 @@ import {
 import { McpServer } from '@modelcontextprotocol/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  htmlPage,
+  htmlResponse,
   startMcpHttpServer,
   type McpHttpServer,
   type RequestContext
@@ -229,6 +231,65 @@ describe('startMcpHttpServer - verified API key', () => {
     await client.listTools();
     expect(built).toBeGreaterThan(0);
     await client.close();
+  });
+});
+
+describe('startMcpHttpServer - pages', () => {
+  let paged: McpHttpServer;
+  let origin: string;
+  const seen: Array<{ method: string; path: string; body: string }> = [];
+
+  beforeAll(async () => {
+    paged = await startMcpHttpServer({
+      createMcpServer,
+      port: 0,
+      host: '127.0.0.1',
+      basePath: '/box',
+      pages: async (request) => {
+        const path = new URL(request.url).pathname;
+        seen.push({ method: request.method, path, body: await request.text() });
+        if (path !== '/box/form') return undefined;
+        return htmlResponse(htmlPage('Form', '<h1>Form</h1>'), 200);
+      }
+    });
+    origin = `http://127.0.0.1:${String(paged.port)}`;
+  });
+
+  afterAll(() => paged.close());
+
+  it('serves a page under the base path with the strict headers', async () => {
+    const res = await fetch(`${origin}/box/form`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('content-security-policy')).toContain(
+      "default-src 'none'"
+    );
+    expect(await res.text()).toContain('<h1>Form</h1>');
+  });
+
+  it('hands the posted body to the page', async () => {
+    await fetch(`${origin}/box/form`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'a=1'
+    });
+    expect(seen.at(-1)).toEqual({
+      method: 'POST',
+      path: '/box/form',
+      body: 'a=1'
+    });
+  });
+
+  it('answers 404 when the page returns nothing', async () => {
+    const res = await fetch(`${origin}/box/other`);
+    expect(res.status).toBe(404);
+  });
+
+  it('never asks about paths outside the base path or the MCP endpoint', async () => {
+    const before = seen.length;
+    expect((await fetch(`${origin}/form`)).status).toBe(404);
+    expect((await fetch(`${origin}/box/healthz`)).status).toBe(200);
+    expect(seen.length).toBe(before);
   });
 });
 

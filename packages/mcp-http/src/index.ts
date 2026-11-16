@@ -7,11 +7,20 @@ export {
   type RequestContext
 } from './server.js';
 export {
+  createOAuthHandler,
   type OAuthGrant,
   type OAuthHandler,
   type OAuthOptions
 } from './oauth.js';
 export {
+  DEFAULT_TRUSTED_HOSTS,
+  type ClientIdMetadataOptions
+} from './client-metadata.js';
+export { oidcUpstream, type OidcUpstreamOptions } from './oidc.js';
+export {
+  escapeHtml,
+  htmlPage,
+  htmlResponse,
   type SettingsField,
   type SettingsForm,
   type SettingsOption
