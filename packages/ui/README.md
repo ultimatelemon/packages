@@ -38,6 +38,64 @@ for confirmations; `AlertDialogAction` takes the `Button` variants) and
 Mount `<Toaster />` once in the root layout, then call `toast('Saved')` or
 `toast.error('…')` from any client component.
 
+## App shell
+
+`AppShell` is the dashboard layout: an inset sidebar on `--frame` with grouped
+nav, badges and sub-pages, a collapsible icon rail (⌘B) and a menu below
+`md`, and the page in a rounded panel on `--panel`. `PageHeader` adds the
+sticky breadcrumb bar and the title; `navTrail` builds its breadcrumb from the
+same nav. The shell does not know your router: pass the `pathname` and your
+link component.
+
+```tsx
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { AppShell, type AppShellNavGroup } from '@ultimatelemon-eu/ui';
+
+const NAV: AppShellNavGroup[] = [
+  {
+    items: [
+      { href: '/', label: 'Overview', icon: <FontAwesomeIcon icon={faHouse} /> }
+    ]
+  },
+  {
+    label: 'Changes',
+    items: [{ href: '/plans', label: 'Plans', badge: <Badge>3</Badge> }]
+  }
+];
+
+export function Shell({
+  children,
+  collapsed
+}: {
+  children: React.ReactNode;
+  collapsed: boolean;
+}) {
+  return (
+    <AppShell
+      nav={NAV}
+      pathname={usePathname()}
+      linkComponent={Link}
+      logo={
+        <img src="/logo.png" alt="UltimateLemon" className="h-[26px] w-auto" />
+      }
+      logoLabel="Overview"
+      defaultCollapsed={collapsed}
+      collapseCookie="myapp_sidebar"
+      sidebarFooter={({ collapsed }) => (collapsed ? null : <UserMenu />)}
+    >
+      {children}
+    </AppShell>
+  );
+}
+```
+
+Read the cookie on the server to pass `defaultCollapsed`, so the rail renders
+in the right state. Its colours are `--frame`, `--panel`, `--panel-border` and
+`--sidebar-active`; override them like any other token.
+
 ## Icons
 
 The kit ships no icons. We use Font Awesome Pro, and its licence does not
