@@ -1,7 +1,7 @@
 # @ultimatelemon-eu/github-app
 
 Act on GitHub as a GitHub App: short-lived installation tokens, narrowed to
-the repositories and permissions one use needs (ADR-0019). Signs the App JWT,
+the repositories and permissions one use needs (ADR-0020). Signs the App JWT,
 finds the installation, and reuses a token until five minutes before it
 expires. Node only, no dependencies.
 
