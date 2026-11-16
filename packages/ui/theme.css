@@ -44,6 +44,12 @@
 
   --shadow-color: light-dark(rgb(20 35 28 / 0.12), rgb(0 0 0 / 0.6));
   --radius: 0.625rem;
+
+  /* AppShell: the sidebar sits on the frame, the page in a raised panel. */
+  --frame: var(--muted);
+  --panel: var(--background);
+  --panel-border: var(--border);
+  --sidebar-active: var(--accent);
 }
 
 :root[data-theme='light'] {
@@ -74,6 +80,10 @@
   --color-input: var(--input);
   --color-link: var(--link);
   --color-ring: var(--ring);
+  --color-frame: var(--frame);
+  --color-panel: var(--panel);
+  --color-panel-border: var(--panel-border);
+  --color-sidebar-active: var(--sidebar-active);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

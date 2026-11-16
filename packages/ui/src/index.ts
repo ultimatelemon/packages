@@ -12,6 +12,21 @@ export {
   AlertDialogTitle,
   AlertDialogTrigger
 } from './alert-dialog.js';
+export {
+  AppShell,
+  PageHeader,
+  isNavActive,
+  navTrail,
+  type AppShellIcons,
+  type AppShellLink,
+  type AppShellLinkProps,
+  type AppShellNavGroup,
+  type AppShellNavItem,
+  type AppShellProps,
+  type AppShellState,
+  type Crumb,
+  type PageHeaderProps
+} from './app-shell.js';
 export { Badge, badgeVariants } from './badge.js';
 export { Button, buttonVariants } from './button.js';
 export {

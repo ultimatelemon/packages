@@ -5,7 +5,7 @@ import { extendTailwindMerge } from 'tailwind-merge';
 const twMerge = extendTailwindMerge({
   extend: {
     theme: {
-      color: ['link'],
+      color: ['link', 'frame', 'panel', 'panel-border', 'sidebar-active'],
       font: ['display'],
       shadow: ['card']
     }
